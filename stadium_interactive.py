@@ -87,8 +87,20 @@ class EmotionDetector:
 class AudioLevelReader:
     """Le nivel de audio de um microfone USB e devolve escala 0-1023."""
 
-    def __init__(self, device_index: Optional[int], samplerate: int, frames: int) -> None:
+    def __init__(
+        self,
+        device_index: Optional[int],
+        samplerate: int,
+        frames: int,
+        gain: float,
+        noise_floor: float,
+        smoothing: float,
+    ) -> None:
         self.frames = frames
+        self.gain = gain
+        self.noise_floor = max(0.0, min(0.5, noise_floor))
+        self.smoothing = max(0.0, min(1.0, smoothing))
+        self.prev_level: Optional[int] = None
         self.pa = pyaudio.PyAudio()
         self.stream = self._open_stream(device_index, samplerate, frames)
         self.max_int = float(np.iinfo(np.int16).max)
@@ -138,8 +150,26 @@ class AudioLevelReader:
         if samples.size == 0:
             return 0
         rms = float(np.sqrt(np.mean(np.square(samples))))
-        level = int(min(NOISE_MAX, (rms / self.max_int) * NOISE_MAX * 2))  # ganho x2
-        return level
+        rms_norm = rms / self.max_int
+        # Remove ruído de fundo (floor) e aplica ganho.
+        if rms_norm > self.noise_floor:
+            rms_norm = (rms_norm - self.noise_floor) / (1 - self.noise_floor)
+        else:
+            rms_norm = 0.0
+        level_raw = int(min(NOISE_MAX, rms_norm * self.gain * NOISE_MAX))
+
+        if self.smoothing <= 0:
+            level_smooth = level_raw
+        else:
+            if self.prev_level is None:
+                level_smooth = level_raw
+            else:
+                alpha = self.smoothing
+                level_smooth = int(
+                    self.prev_level + alpha * (level_raw - self.prev_level)
+                )
+        self.prev_level = level_smooth
+        return level_smooth
 
     def close(self) -> None:
         try:
@@ -159,6 +189,9 @@ class PiBackend:
         mic_device: Optional[int],
         mic_samplerate: int,
         mic_frames: int,
+        mic_gain: float,
+        mic_noise_floor: float,
+        mic_smoothing: float,
         button_pin: int,
         led_pin: int,
         use_camera: bool,
@@ -167,7 +200,9 @@ class PiBackend:
         wb_kelvin: Optional[int],
         color_gains: Optional[Tuple[float, float]],
     ) -> None:
-        self.audio = AudioLevelReader(mic_device, mic_samplerate, mic_frames)
+        self.audio = AudioLevelReader(
+            mic_device, mic_samplerate, mic_frames, mic_gain, mic_noise_floor, mic_smoothing
+        )
         self.button = Button(button_pin, pull_up=False)
         self.led = LED(led_pin)
 
@@ -321,6 +356,24 @@ def parse_args() -> argparse.Namespace:
         help="Numero de frames lidos por ciclo (quanto maior, mais lento).",
     )
     parser.add_argument(
+        "--mic-gain",
+        type=float,
+        default=2.0,
+        help="Ganho aplicado ao audio normalizado (ajuste para evitar saturar).",
+    )
+    parser.add_argument(
+        "--mic-noise-floor",
+        type=float,
+        default=0.02,
+        help="Nivel de ruido de fundo a remover (0-0.5). Aumente se o micro captar ruido constante.",
+    )
+    parser.add_argument(
+        "--mic-smoothing",
+        type=float,
+        default=0.3,
+        help="Fator de suavizacao exponencial (0-1). Valores maiores suavizam mais.",
+    )
+    parser.add_argument(
         "--button-pin",
         type=int,
         default=17,
@@ -393,6 +446,9 @@ def main() -> None:
         mic_device=args.mic_device,
         mic_samplerate=args.mic_samplerate,
         mic_frames=args.mic_frames,
+        mic_gain=args.mic_gain,
+        mic_noise_floor=args.mic_noise_floor,
+        mic_smoothing=args.mic_smoothing,
         button_pin=args.button_pin,
         led_pin=args.led_pin,
         use_camera=args.camera or args.display,
