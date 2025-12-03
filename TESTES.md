@@ -15,6 +15,7 @@
    - Janela com rostos, bounding boxes e emocao (Feliz se sorriso, Neutro se nao).
    - Overlay com `Ruido`, `Pressao` e `Estado` visivel no frame.
    - LED fisico corresponde ao estado (GOLO/VAIA/Entusiasmo normal).
+   - Opcional: testar `--wb-kelvin 4500` para forcar balanço de brancos e ver se as cores estabilizam.
 7. **Fecho limpo**: Premir `q` na janela ou `Ctrl+C` no terminal; confirmar que a app fecha sem stack trace e liberta GPIO/camera.
 
 ## Diagnostico rapido

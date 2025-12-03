@@ -164,6 +164,7 @@ class PiBackend:
         use_camera: bool,
         display: bool,
         resolution: Tuple[int, int],
+        wb_kelvin: Optional[int],
     ) -> None:
         self.audio = AudioLevelReader(mic_device, mic_samplerate, mic_frames)
         self.button = Button(button_pin, pull_up=False)
@@ -185,6 +186,12 @@ class PiBackend:
             )
             self.camera.configure(config)
             self.camera.start()
+            if wb_kelvin:
+                # Desliga AWB automatico e fixa a temperatura de cor em Kelvin.
+                self.camera.set_controls({"AwbEnable": False, "ColourTemperature": wb_kelvin})
+            else:
+                # Mantem AWB ligado se nao for especificado Kelvin.
+                self.camera.set_controls({"AwbEnable": True})
             self.detector = EmotionDetector()
 
         time.sleep(0.05)
@@ -341,6 +348,12 @@ def parse_args() -> argparse.Namespace:
         default="640x480",
         help="Resolucao da camera (ex.: 640x480).",
     )
+    parser.add_argument(
+        "--wb-kelvin",
+        type=int,
+        default=None,
+        help="Define temperatura de cor fixa em Kelvin (ex.: 4500). Se nao for usada, AWB fica automatico.",
+    )
     return parser.parse_args()
 
 
@@ -364,6 +377,7 @@ def main() -> None:
         use_camera=args.camera or args.display,
         display=args.display,
         resolution=(width, height),
+        wb_kelvin=args.wb_kelvin,
     )
     run_loop(backend, args.interval, args.display)
 
