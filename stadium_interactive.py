@@ -95,11 +95,18 @@ class AudioLevelReader:
         gain: float,
         noise_floor: float,
         smoothing: float,
+        auto_gain: bool,
+        target_level: float,
+        peak_decay: float,
     ) -> None:
         self.frames = frames
         self.gain = gain
         self.noise_floor = max(0.0, min(0.5, noise_floor))
         self.smoothing = max(0.0, min(1.0, smoothing))
+        self.auto_gain = auto_gain
+        self.target_level = max(0.1, min(1.0, target_level))
+        self.peak_decay = max(0.0, min(1.0, peak_decay))
+        self.rolling_peak = 0.1
         self.prev_level: Optional[int] = None
         self.pa = pyaudio.PyAudio()
         self.stream = self._open_stream(device_index, samplerate, frames)
@@ -156,7 +163,16 @@ class AudioLevelReader:
             rms_norm = (rms_norm - self.noise_floor) / (1 - self.noise_floor)
         else:
             rms_norm = 0.0
-        level_raw = int(min(NOISE_MAX, rms_norm * self.gain * NOISE_MAX))
+        # Auto-gain dinamico para aproveitar a escala.
+        if self.auto_gain:
+            self.rolling_peak = max(rms_norm, self.rolling_peak * self.peak_decay)
+            dyn_gain = self.gain
+            if self.rolling_peak > 0:
+                dyn_gain *= self.target_level / self.rolling_peak
+        else:
+            dyn_gain = self.gain
+
+        level_raw = int(min(NOISE_MAX, rms_norm * dyn_gain * NOISE_MAX))
 
         if self.smoothing <= 0:
             level_smooth = level_raw
@@ -192,6 +208,9 @@ class PiBackend:
         mic_gain: float,
         mic_noise_floor: float,
         mic_smoothing: float,
+        mic_auto_gain: bool,
+        mic_target_level: float,
+        mic_peak_decay: float,
         button_pin: int,
         led_pin: int,
         use_camera: bool,
@@ -201,7 +220,15 @@ class PiBackend:
         color_gains: Optional[Tuple[float, float]],
     ) -> None:
         self.audio = AudioLevelReader(
-            mic_device, mic_samplerate, mic_frames, mic_gain, mic_noise_floor, mic_smoothing
+            mic_device,
+            mic_samplerate,
+            mic_frames,
+            mic_gain,
+            mic_noise_floor,
+            mic_smoothing,
+            mic_auto_gain,
+            mic_target_level,
+            mic_peak_decay,
         )
         self.button = Button(button_pin, pull_up=False)
         self.led = LED(led_pin)
@@ -374,6 +401,30 @@ def parse_args() -> argparse.Namespace:
         help="Fator de suavizacao exponencial (0-1). Valores maiores suavizam mais.",
     )
     parser.add_argument(
+        "--mic-auto-gain",
+        action="store_true",
+        default=True,
+        help="Ativa ajuste dinamico de ganho para aproveitar a escala (desative com --no-mic-auto-gain).",
+    )
+    parser.add_argument(
+        "--no-mic-auto-gain",
+        dest="mic_auto_gain",
+        action="store_false",
+        help="Desativa auto-gain.",
+    )
+    parser.add_argument(
+        "--mic-target-level",
+        type=float,
+        default=0.6,
+        help="Nivel alvo (0-1) usado no auto-gain para escalar o pico recente.",
+    )
+    parser.add_argument(
+        "--mic-peak-decay",
+        type=float,
+        default=0.95,
+        help="Fator de decaimento do pico (0-1) para o auto-gain.",
+    )
+    parser.add_argument(
         "--button-pin",
         type=int,
         default=17,
@@ -449,6 +500,9 @@ def main() -> None:
         mic_gain=args.mic_gain,
         mic_noise_floor=args.mic_noise_floor,
         mic_smoothing=args.mic_smoothing,
+        mic_auto_gain=args.mic_auto_gain,
+        mic_target_level=args.mic_target_level,
+        mic_peak_decay=args.mic_peak_decay,
         button_pin=args.button_pin,
         led_pin=args.led_pin,
         use_camera=args.camera or args.display,
