@@ -31,6 +31,8 @@ python stadium_interactive.py --display --camera --interval 0.1  --mic-samplerat
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --color-gains 1.8,1.2
 # Exemplo combinando Kelvin + gains:
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --wb-kelvin 4500 --color-gains 1.4,1.0
+# Exemplo sem microfone (ruido=0):
+# python stadium_interactive.py --display --camera --interval 0.1 --no-mic-enabled
 ```
 
 Argumentos uteis:
@@ -41,6 +43,7 @@ Argumentos uteis:
 - `--mic-noise-floor` (padrao 0.02) ruido de fundo a remover (0-0.5). Aumente para ignorar ruido constante.
 - `--mic-smoothing` (padrao 0.3) suavizacao exponencial do nivel (0-1). Maior = mais estavel, menos picos.
 - `--mic-auto-gain` ativa ajuste dinamico (por defeito esta desligado; use apenas se quiser que o ganho seja automatico).
+- `--mic-enabled/--no-mic-enabled` para ligar/desligar o micro (ao desativar, o ruido fica sempre 0).
 - `--button-pin` (padrao 17) GPIO do botao (BCM).
 - `--led-pin` (padrao 27) GPIO do LED (BCM).
 - `--camera` ativa a Camera Pi v2 (necessario para deteccao de rosto/emocao).

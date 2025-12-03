@@ -30,17 +30,23 @@ class FaceEmotion:
 
 
 class EmotionDetector:
-    """Deteta faces e estima emocao simples (sorriso -> Feliz; senao Neutro)."""
+    """
+    Deteta faces e estima emocao simples:
+    - Feliz: sorriso detetado
+    - Triste: olhos detetados mas sem sorriso
+    - Zangado: sem olhos/sorriso (heuristica para rostos com sobrancelhas cerradas/olhos menos visiveis)
+    """
 
     def __init__(self) -> None:
         cascades = self._cascade_dir()
         self.face_cascade = cv2.CascadeClassifier(
             str(cascades / "haarcascade_frontalface_default.xml")
         )
+        self.eye_cascade = cv2.CascadeClassifier(str(cascades / "haarcascade_eye.xml"))
         self.smile_cascade = cv2.CascadeClassifier(
             str(cascades / "haarcascade_smile.xml")
         )
-        if self.face_cascade.empty() or self.smile_cascade.empty():
+        if self.face_cascade.empty() or self.smile_cascade.empty() or self.eye_cascade.empty():
             raise RuntimeError("Nao foi possivel carregar cascades do OpenCV.")
 
     def _cascade_dir(self) -> Path:
@@ -79,9 +85,21 @@ class EmotionDetector:
             smiles = self.smile_cascade.detectMultiScale(
                 roi_gray, scaleFactor=1.7, minNeighbors=20
             )
-            emotion = "Feliz" if len(smiles) > 0 else "Neutro"
+            eyes = self.eye_cascade.detectMultiScale(
+                roi_gray, scaleFactor=1.1, minNeighbors=10
+            )
+            emotion = self._classify(smiles, eyes)
             results.append(FaceEmotion(x, y, w, h, emotion))
         return results
+
+    def _classify(self, smiles, eyes) -> str:
+        has_smile = len(smiles) > 0
+        has_eyes = len(eyes) > 0
+        if has_smile:
+            return "Feliz"
+        if has_eyes:
+            return "Triste"
+        return "Zangado"
 
 
 class AudioLevelReader:
@@ -191,6 +209,16 @@ class AudioLevelReader:
             self.pa.terminate()
 
 
+class DummyAudioLevelReader:
+    """Substituto quando o microfone nao deve ser usado."""
+
+    def close(self) -> None:
+        pass
+
+    def read_level(self) -> int:
+        return 0
+
+
 class PiBackend:
     """
     Le sensores no Raspberry Pi: microfone USB para ruido, botao GPIO e LED, camera opcional.
@@ -208,6 +236,7 @@ class PiBackend:
         mic_target_level: float,
         mic_peak_decay: float,
         mic_max_gain: float,
+        mic_enabled: bool,
         button_pin: int,
         led_pin: int,
         use_camera: bool,
@@ -216,18 +245,21 @@ class PiBackend:
         wb_kelvin: Optional[int],
         color_gains: Optional[Tuple[float, float]],
     ) -> None:
-        self.audio = AudioLevelReader(
-            mic_device,
-            mic_samplerate,
-            mic_frames,
-            mic_gain,
-            mic_noise_floor,
-            mic_smoothing,
-            mic_auto_gain,
-            mic_target_level,
-            mic_peak_decay,
-            mic_max_gain,
-        )
+        if mic_enabled:
+            self.audio = AudioLevelReader(
+                mic_device,
+                mic_samplerate,
+                mic_frames,
+                mic_gain,
+                mic_noise_floor,
+                mic_smoothing,
+                mic_auto_gain,
+                mic_target_level,
+                mic_peak_decay,
+                mic_max_gain,
+            )
+        else:
+            self.audio = DummyAudioLevelReader()
         self.button = Button(button_pin, pull_up=False)
         self.led = LED(led_pin)
 
@@ -423,6 +455,18 @@ def parse_args() -> argparse.Namespace:
         help="Limite superior do ganho dinamico (auto-gain) para evitar saturar.",
     )
     parser.add_argument(
+        "--mic-enabled",
+        action="store_true",
+        default=True,
+        help="Ativa leitura do microfone. Use --no-mic-enabled para correr sem micro.",
+    )
+    parser.add_argument(
+        "--no-mic-enabled",
+        dest="mic_enabled",
+        action="store_false",
+        help="Desativa leitura do microfone (ruido fica 0).",
+    )
+    parser.add_argument(
         "--button-pin",
         type=int,
         default=17,
@@ -502,6 +546,7 @@ def main() -> None:
         mic_target_level=args.mic_target_level,
         mic_peak_decay=args.mic_peak_decay,
         mic_max_gain=args.mic_max_gain,
+        mic_enabled=args.mic_enabled,
         button_pin=args.button_pin,
         led_pin=args.led_pin,
         use_camera=args.camera or args.display,

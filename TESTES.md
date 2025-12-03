@@ -12,10 +12,11 @@
 4. **Ruido alto + botao solto**: Com ruido alto, soltar botao -> LED apaga e `VAIA`.
 5. **Alternancia rapida**: Alternar botao durante ruido alto e confirmar reacao imediata do LED/estado.
 6. **Display + emocoes**: `python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --mic-gain 2.5 --mic-noise-floor 0.0 --mic-smoothing 0.2`. Confirmar:
-   - Janela com rostos, bounding boxes e emocao (Feliz se sorriso, Neutro se nao).
+   - Janela com rostos, bounding boxes e emocao (Feliz/Triste/Zangado simples).
    - Overlay com `Ruido`, `Pressao` e `Estado` visivel no frame.
    - LED fisico corresponde ao estado (GOLO/VAIA/Entusiasmo normal).
    - Opcional: testar `--wb-kelvin 4500` e/ou `--color-gains 1.4,1.0` (podem ser combinados) para estabilizar as cores.
+   - Opcional: validar modo sem micro com `--no-mic-enabled` (Ruido deve ficar 0).
 7. **Fecho limpo**: Premir `q` na janela ou `Ctrl+C` no terminal; confirmar que a app fecha sem stack trace e liberta GPIO/camera.
 
 ## Diagnostico rapido
