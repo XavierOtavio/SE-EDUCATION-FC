@@ -273,26 +273,9 @@ class PiBackend:
                     "picamera2 nao instalado; instale python3-picamera2 ou desative --camera/--display."
                 )
             self.camera = Picamera2()
-            self.camera.set_controls({"AwbEnable": True, "AwbMode": 1}) 
             config = self.camera.create_preview_configuration({'format': 'RGB888'})
             self.camera.configure(config)
             self.camera.start()
-            if wb_kelvin or color_gains:
-                controls = {"AwbEnable": False}
-                if wb_kelvin:
-                    controls["ColourTemperature"] = wb_kelvin
-                if color_gains:
-                    controls["ColourGains"] = color_gains
-                self.camera.set_controls(controls)
-            else:
-                # Default mais quente para melhorar vermelhos em ausencia de configuracao manual.
-                self.camera.set_controls(
-                    {
-                        "AwbEnable": False,
-                        "ColourTemperature": 5200,
-                        "ColourGains": (1.6, 1.0),
-                    }
-                )
             self.detector = EmotionDetector()
 
         time.sleep(0.05)
