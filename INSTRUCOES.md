@@ -1,49 +1,57 @@
-# Estadio Interativo - Guia de Execucao (Raspberry Pi)
+# Estadio Interativo - Guia de Execucao (Raspberry Pi, microfone USB)
 
 ## Requisitos
 - Raspberry Pi com Raspberry Pi OS
-- Sensor de ruido analogico ligado a MCP3008 (canal CH0 por defeito)
+- Microfone USB (para nivel de ruido)
 - Botao em GPIO17 (BCM) com resistor pull-down (ou ajuste para pull-up no codigo)
 - LED em GPIO27 (BCM) com resistor
-- Camera Pi v2 (opcional, para capturas em GOLO/VAIA)
+- Camera Pi v2 (opcional, para deteccao de rostos/emocoes e overlay em video)
 
 ## Preparacao do sistema
-1) Ativar SPI: `sudo raspi-config` > Interface Options > SPI > Enable, depois reiniciar.
+1) Confirmar que o microfone USB e detetado: `arecord -l` ou `python - <<'PY'\nimport sounddevice as sd\nprint(sd.query_devices())\nPY`
 2) Instalar dependencias:
 ```bash
 sudo apt update
-sudo apt install -y python3-gpiozero python3-spidev python3-picamera2  # picamera2 so se quiser usar camera
+sudo apt install -y python3-gpiozero python3-opencv python3-picamera2 python3-sounddevice  # picamera2 so se quiser usar camera/display
 ```
 
-## Instalar dependencias Python
-O script usa apenas gpiozero (e picamera2 se camera ativa). Opcionalmente:
-```bash
-pip install -r requirements.txt  # se criar um requirements, nao obrigatorio aqui
-```
-
-## Executar
+## Executar (modo basico, sem video)
 ```bash
 python stadium_interactive.py --interval 0.5
 ```
-Argumentos uteis:
-- `--noise-channel` (padrao 0) para escolher o canal do MCP3008.
-- `--button-pin` (padrao 17) para definir o GPIO do botao (BCM).
-- `--led-pin` (padrao 27) para definir o GPIO do LED (BCM).
-- `--camera` para ativar capturas com a Camera Pi v2 em transicoes GOLO/VAIA.
-- `--camera-dir` (padrao `capturas`) diretorio onde gravar fotos quando `--camera` esta ativo.
 
-## O que vera no terminal
-Linhas como:
+## Executar com video/emocoes
+```bash
+python stadium_interactive.py --display --camera --interval 0.1
 ```
-Ruido= 850 | Pressao=True  | LED=ON  | GOLO
-Ruido= 900 | Pressao=False | LED=OFF | VAIA
-Ruido= 200 | Pressao=False | LED=OFF | Entusiasmo normal
-```
+
+Argumentos uteis:
+- `--mic-device` indice do microfone (None usa o padrao; veja sd.query_devices()).
+- `--mic-samplerate` (padrao 16000) taxa de amostragem de audio.
+- `--mic-frames` (padrao 1024) amostras lidas por ciclo (mais alto = leitura mais lenta/pouco ruido).
+- `--button-pin` (padrao 17) GPIO do botao (BCM).
+- `--led-pin` (padrao 27) GPIO do LED (BCM).
+- `--camera` ativa a Camera Pi v2 (necessario para deteccao de rosto/emocao).
+- `--display` mostra janela com frame, emocao, ruido, pressao e estado.
+- `--resolution` (ex.: `1280x720`) define a resolucao do feed de camera.
+
+## O que vera
+- Sem `--display`: linhas no terminal, ex.:
+  ```
+  Ruido= 850 | Pressao=True  | LED=ON  | GOLO
+  Ruido= 900 | Pressao=False | LED=OFF | VAIA
+  Ruido= 200 | Pressao=False | LED=OFF | Entusiasmo normal
+  ```
+- Com `--display --camera`: janela de video com:
+  - Rostos com bounding boxes e emocao (Feliz se sorriso detetado, Neutro caso contrario).
+  - Texto no topo com `Ruido`, `Pressao` e `Estado (GOLO/VAIA/Entusiasmo normal)`.
+  - LED fisico segue o mesmo estado.
+  - Premir `q` para fechar a janela.
 
 ## Criterios de aceitacao cobertos
-- Leitura real do sensor de ruido (0-1023) via MCP3008 e do botao (True/False).
+- Leitura real do nivel de ruido (0-1023) via microfone USB e do botao (True/False).
 - Logica:
   - Ruido > 512 e botao pressionado: LED ON e mensagem `GOLO`.
   - Ruido > 512 e botao nao pressionado: LED OFF e mensagem `VAIA`.
   - Ruido <= 512: LED OFF e mensagem `Entusiasmo normal`.
-- Mensagens e estado do LED refletem os sensores em tempo real; se `--camera` estiver ativo, fotos sao guardadas em cada mudanca para GOLO/VAIA.
+- Com `--display --camera`, a janela mostra rostos com emocao e overlay de ruido/pressao/estado em tempo real; LED reflete o estado.

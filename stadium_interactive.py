@@ -1,90 +1,145 @@
 import argparse
 import time
-from datetime import datetime
-from pathlib import Path
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
-from gpiozero import MCP3008, Button, LED
+import cv2
+import numpy as np
+import sounddevice as sd
+from gpiozero import Button, LED
 
 try:
     from picamera2 import Picamera2
-except ImportError:  # pragma: no cover - opcional em ambientes sem camera
+except ImportError:  # pragma: no cover
     Picamera2 = None
 
 NOISE_MIN = 0
 NOISE_MAX = 1023
 THRESHOLD = 512
+WINDOW_NAME = "Estadio Interativo"
+
+
+@dataclass
+class FaceEmotion:
+    x: int
+    y: int
+    w: int
+    h: int
+    emotion: str
+
+
+class EmotionDetector:
+    """Deteta faces e estima emocao simples (sorriso -> Feliz; senao Neutro)."""
+
+    def __init__(self) -> None:
+        cascades = cv2.data.haarcascades
+        self.face_cascade = cv2.CascadeClassifier(
+            cascades + "haarcascade_frontalface_default.xml"
+        )
+        self.smile_cascade = cv2.CascadeClassifier(
+            cascades + "haarcascade_smile.xml"
+        )
+        if self.face_cascade.empty() or self.smile_cascade.empty():
+            raise RuntimeError("Nao foi possivel carregar cascades do OpenCV.")
+
+    def detect(self, frame_bgr) -> List[FaceEmotion]:
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5)
+        results: List[FaceEmotion] = []
+        for (x, y, w, h) in faces:
+            roi_gray = gray[y : y + h, x : x + w]
+            smiles = self.smile_cascade.detectMultiScale(
+                roi_gray, scaleFactor=1.7, minNeighbors=20
+            )
+            emotion = "Feliz" if len(smiles) > 0 else "Neutro"
+            results.append(FaceEmotion(x, y, w, h, emotion))
+        return results
+
+
+class AudioLevelReader:
+    """Le nivel de audio de um microfone USB e devolve escala 0-1023."""
+
+    def __init__(self, device: Optional[int], samplerate: int, frames: int) -> None:
+        self.device = device
+        self.samplerate = samplerate
+        self.frames = frames
+
+    def read_level(self) -> int:
+        # Leitura bloqueante curta; converte RMS (0-1) para 0-1023 com ganho moderado.
+        data = sd.rec(
+            self.frames,
+            samplerate=self.samplerate,
+            channels=1,
+            blocking=True,
+            device=self.device,
+            dtype="float32",
+        )
+        rms = float(np.sqrt(np.mean(np.square(data))))
+        level = int(min(NOISE_MAX, rms * NOISE_MAX * 4))  # ganho para sensibilidade
+        return level
 
 
 class PiBackend:
     """
-    Le sensores reais no Raspberry Pi (MCP3008 para analógico) e controla LED e camera.
-
-    Mapeamento esperado:
-    - MCP3008 canal 0: sensor de ruido (analogico)
-    - GPIO 17: botao (digital, pull-down externo ou pull_up=True se usar pull-up)
-    - GPIO 27: LED (digital)
-    - Camera Pi v2: opcional (capturas quando GOLO/VAIA mudam)
+    Le sensores no Raspberry Pi: microfone USB para ruido, botao GPIO e LED, camera opcional.
     """
 
     def __init__(
         self,
-        noise_channel: int,
+        mic_device: Optional[int],
+        mic_samplerate: int,
+        mic_frames: int,
         button_pin: int,
         led_pin: int,
-        camera_enabled: bool,
-        camera_dir: str,
-        attempts: int = 50,
+        use_camera: bool,
+        display: bool,
+        resolution: Tuple[int, int],
     ) -> None:
-        self.noise_sensor = MCP3008(channel=noise_channel)
+        self.audio = AudioLevelReader(mic_device, mic_samplerate, mic_frames)
         self.button = Button(button_pin, pull_up=False)
         self.led = LED(led_pin)
 
-        self.camera_dir = Path(camera_dir)
+        self.detector: Optional[EmotionDetector] = None
         self.camera: Optional[Picamera2] = None
-        if camera_enabled:
+        self.display = display
+
+        if use_camera or display:
             if Picamera2 is None:
                 raise RuntimeError(
-                    "picamera2 nao instalado; instale python3-picamera2 ou desative --camera."
+                    "picamera2 nao instalado; instale python3-picamera2 ou desative --camera/--display."
                 )
-            self.camera_dir.mkdir(parents=True, exist_ok=True)
             self.camera = Picamera2()
-            self.camera.configure(self.camera.create_still_configuration())
+            config = self.camera.create_preview_configuration(
+                main={"size": resolution, "format": "RGB888"}
+            )
+            self.camera.configure(config)
             self.camera.start()
+            self.detector = EmotionDetector()
 
-        self.max_attempts = attempts
-        time.sleep(0.1)
+        time.sleep(0.05)
 
     def read(self) -> Tuple[int, bool]:
-        """
-        Ler ruido (0-1023) e estado do botao (True/False).
-        MCP3008.value devolve 0.0-1.0; escalamos para 0-1023.
-        """
-        for _ in range(self.max_attempts):
-            noise_val = self.noise_sensor.value
-            pressure_val = self.button.is_pressed
-            if noise_val is not None:
-                noise_scaled = int(round(noise_val * NOISE_MAX))
-                return noise_scaled, bool(pressure_val)
-            time.sleep(0.01)
-        raise RuntimeError("Sem leitura do MCP3008; confirme SPI e ligações.")
+        """Ler ruido (0-1023) do microfone USB e estado do botao (True/False)."""
+        noise_scaled = self.audio.read_level()
+        pressure_val = self.button.is_pressed
+        return noise_scaled, bool(pressure_val)
 
     def set_led(self, on: bool) -> None:
         self.led.on() if on else self.led.off()
 
-    def capture(self, message: str) -> None:
-        """Captura uma foto quando a camera esta ativa."""
+    def capture_frame(self):
         if not self.camera:
-            return
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = self.camera_dir / f"{timestamp}_{message.lower()}.jpg"
-        self.camera.capture_file(str(filename))
-        print(f"[camera] captura guardada em {filename}")
+            return None
+        return self.camera.capture_array("main")
+
+    def detect_emotions(self, frame_bgr) -> List[FaceEmotion]:
+        if not self.detector or frame_bgr is None:
+            return []
+        return self.detector.detect(frame_bgr)
 
     def close(self) -> None:
         if self.camera:
             self.camera.stop()
-        self.noise_sensor.close()
         self.button.close()
         self.led.close()
 
@@ -98,43 +153,92 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
     return "Entusiasmo normal", False
 
 
-def run_loop(backend: PiBackend, interval: float) -> None:
-    print("A ler sensores no Raspberry Pi. Ctrl+C para sair.")
-    last_message: Optional[str] = None
+def draw_overlay(
+    frame, faces: List[FaceEmotion], noise: int, pressure: bool, message: str
+) -> None:
+    """Desenha bounding boxes, emocao e info de ruido/pressao/estado no frame."""
+    for f in faces:
+        cv2.rectangle(frame, (f.x, f.y), (f.x + f.w, f.y + f.h), (0, 255, 0), 2)
+        cv2.putText(
+            frame,
+            f.emotion,
+            (f.x, max(f.y - 10, 0)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+    overlay_text = f"Ruido: {noise}  Pressao: {pressure}  Estado: {message}"
+    cv2.putText(
+        frame,
+        overlay_text,
+        (10, 25),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+
+def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
+    print("A ler sensores no Raspberry Pi. Janela de video se display ativo. Ctrl+C para sair.")
     try:
         while True:
             noise, pressure = backend.read()
             message, led_on = decide(noise, pressure)
             backend.set_led(led_on)
-            if message != last_message and message in {"GOLO", "VAIA"}:
-                backend.capture(message)
-            last_message = message
-            led_label = "ON " if led_on else "OFF"
-            print(
-                f"Ruido={noise:4d} | Pressao={pressure!s:5} | LED={led_label} | {message}"
-            )
+
+            frame = backend.capture_frame() if display else None
+            if frame is not None:
+                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                faces = backend.detect_emotions(frame_bgr)
+                draw_overlay(frame_bgr, faces, noise, pressure, message)
+                cv2.imshow(WINDOW_NAME, frame_bgr)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+            else:
+                led_label = "ON " if led_on else "OFF"
+                print(
+                    f"Ruido={noise:4d} | Pressao={pressure!s:5} | LED={led_label} | {message}"
+                )
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\nTerminando...")
     finally:
         backend.close()
+        if display:
+            cv2.destroyAllWindows()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Estadio interativo em Raspberry Pi (GPIO + MCP3008 + camera opcional)."
+        description="Estadio interativo em Raspberry Pi (microfone USB + GPIO + camera/emocao)."
     )
     parser.add_argument(
-        "--noise-channel",
+        "--mic-device",
         type=int,
-        default=0,
-        help="Canal do MCP3008 para o sensor de ruido (0-7).",
+        default=None,
+        help="Indice do dispositivo de microfone (None usa o padrao do SO).",
+    )
+    parser.add_argument(
+        "--mic-samplerate",
+        type=int,
+        default=16000,
+        help="Sample rate para captura de audio.",
+    )
+    parser.add_argument(
+        "--mic-frames",
+        type=int,
+        default=1024,
+        help="Numero de frames lidos por ciclo (quanto maior, mais lento).",
     )
     parser.add_argument(
         "--button-pin",
         type=int,
         default=17,
-        help="GPIO do botao (BCM). Use pull-down externo ou troque pull_up conforme wiring.",
+        help="GPIO do botao (BCM). Use pull-down externo ou ajuste wiring.",
     )
     parser.add_argument(
         "--led-pin",
@@ -151,26 +255,43 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         action="store_true",
-        help="Ativa capturas com a Camera Pi v2 quando a mensagem muda para GOLO/VAIA.",
+        help="Ativa camera (necessaria para mostrar video/emocoes).",
     )
     parser.add_argument(
-        "--camera-dir",
-        default="capturas",
-        help="Diretorio onde guardar fotos (quando camera ativa).",
+        "--display",
+        action="store_true",
+        help="Mostra janela com frame, emocao, ruido, pressao e estado.",
+    )
+    parser.add_argument(
+        "--resolution",
+        default="640x480",
+        help="Resolucao da camera (ex.: 640x480).",
     )
     return parser.parse_args()
 
 
+def parse_resolution(res_str: str) -> Tuple[int, int]:
+    try:
+        w, h = res_str.lower().split("x")
+        return int(w), int(h)
+    except Exception as exc:  # pragma: no cover - validacao simples
+        raise argparse.ArgumentTypeError("Resolucao deve ser no formato LxA, ex.: 640x480") from exc
+
+
 def main() -> None:
     args = parse_args()
+    width, height = parse_resolution(args.resolution)
     backend = PiBackend(
-        noise_channel=args.noise_channel,
+        mic_device=args.mic_device,
+        mic_samplerate=args.mic_samplerate,
+        mic_frames=args.mic_frames,
         button_pin=args.button_pin,
         led_pin=args.led_pin,
-        camera_enabled=args.camera,
-        camera_dir=args.camera_dir,
+        use_camera=args.camera or args.display,
+        display=args.display,
+        resolution=(width, height),
     )
-    run_loop(backend, args.interval)
+    run_loop(backend, args.interval, args.display)
 
 
 if __name__ == "__main__":
