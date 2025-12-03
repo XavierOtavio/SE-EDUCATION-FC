@@ -18,6 +18,8 @@ NOISE_MIN = 0
 NOISE_MAX = 1023
 THRESHOLD = 512
 WINDOW_NAME = "Estadio Interativo"
+TEAM_BOX_SIZE = 60
+TEAM_BOX_MARGIN = 10
 
 
 @dataclass
@@ -97,15 +99,34 @@ class EmotionDetector:
             results.append(FaceEmotion(x, y, w, h, emotion))
         return results
 
-    def _classify(self, smiles, eyes, mean_intensity: float) -> str:
-        has_smile = len(smiles) > 0
-        has_eyes = len(eyes) > 0
-        if has_smile:
-            return "Feliz"
-        # Heuristica simples: se esta escuro ou olhos nao aparecem, marcar como Zangado.
-        if not has_eyes or mean_intensity < 70:
-            return "Zangado"
-        return "Triste"
+def _classify(self, smiles, eyes, mean_intensity: float) -> str:
+    has_smile = len(smiles) > 0
+    has_eyes = len(eyes) > 0
+    if has_smile:
+        return "Feliz"
+    # Heuristica simples: se esta escuro ou olhos nao aparecem, marcar como Zangado.
+    if not has_eyes or mean_intensity < 90:
+        return "Zangado"
+    return "Triste"
+
+
+def dominant_color(frame_bgr, k: int = 3) -> Tuple[int, int, int]:
+    """
+    Estima a cor predominante do frame (usando k-means) e devolve BGR.
+    Usa imagem reduzida para reduzir custo.
+    """
+    try:
+        small = cv2.resize(frame_bgr, (80, 80))
+        data = small.reshape((-1, 3)).astype(np.float32)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+        _, labels, centers = cv2.kmeans(
+            data, k, None, criteria, 5, cv2.KMEANS_PP_CENTERS
+        )
+        counts = np.bincount(labels.flatten())
+        dominant = centers[np.argmax(counts)]
+        return tuple(int(c) for c in dominant)
+    except Exception:
+        return (0, 0, 255)  # fallback vermelho
 
 
 class AudioLevelReader:
@@ -323,7 +344,12 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
 
 
 def draw_overlay(
-    frame, faces: List[FaceEmotion], noise: int, pressure: bool, message: str
+    frame,
+    faces: List[FaceEmotion],
+    noise: int,
+    pressure: bool,
+    message: str,
+    team_color: Tuple[int, int, int],
 ) -> None:
     """Desenha bounding boxes, emocao e info de ruido/pressao/estado no frame."""
     for f in faces:
@@ -349,6 +375,22 @@ def draw_overlay(
         2,
         cv2.LINE_AA,
     )
+    h, w, _ = frame.shape
+    x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
+    y1 = h - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
+    x2 = w - TEAM_BOX_MARGIN
+    y2 = h - TEAM_BOX_MARGIN
+    cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, thickness=-1)
+    cv2.putText(
+        frame,
+        "Equipa",
+        (x1, y1 - 5),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
 
 
 def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
@@ -362,9 +404,11 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             frame = backend.capture_frame() if display else None
             if frame is not None:
                 # Camera montada invertida: rodar 180 graus para corrigir orientacao.
-                frame_bgr = cv2.rotate(frame, cv2.ROTATE_180)
+                frame_rgb = cv2.rotate(frame, cv2.ROTATE_180)
+                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
                 faces = backend.detect_emotions(frame_bgr)
-                draw_overlay(frame_bgr, faces, noise, pressure, message)
+                team_color = dominant_color(frame_bgr)
+                draw_overlay(frame_bgr, faces, noise, pressure, message, team_color)
                 cv2.imshow(WINDOW_NAME, frame_bgr)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
