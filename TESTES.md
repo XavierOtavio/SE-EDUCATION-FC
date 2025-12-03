@@ -11,7 +11,7 @@
 3. **Ruido alto + botao pressionado**: Bater palmas/falar alto e pressionar botao -> LED acende e `GOLO`.
 4. **Ruido alto + botao solto**: Com ruido alto, soltar botao -> LED apaga e `VAIA`.
 5. **Alternancia rapida**: Alternar botao durante ruido alto e confirmar reacao imediata do LED/estado.
-6. **Display + emocoes**: `python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --mic-gain 1.5 --mic-noise-floor 0.05 --mic-smoothing 0.5`. Confirmar:
+6. **Display + emocoes**: `python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --mic-gain 2.5 --mic-noise-floor 0.0 --mic-smoothing 0.2`. Confirmar:
    - Janela com rostos, bounding boxes e emocao (Feliz se sorriso, Neutro se nao).
    - Overlay com `Ruido`, `Pressao` e `Estado` visivel no frame.
    - LED fisico corresponde ao estado (GOLO/VAIA/Entusiasmo normal).

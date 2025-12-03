@@ -37,9 +37,10 @@ Argumentos uteis:
 - `--mic-device` indice do microfone (None usa o padrao; veja lista pelo pyaudio no snippet abaixo).
 - `--mic-samplerate` (padrao 16000) taxa de amostragem de audio (tente 44100 se tiver erro de sample rate).
 - `--mic-frames` (padrao 1024) amostras lidas por ciclo (mais alto = leitura mais lenta/pouco ruido).
-- `--mic-gain` (padrao 2.0) ganho aplicado ao nivel do micro (baixe se satura rapido).
+- `--mic-gain` (padrao 2.0) ganho aplicado ao nivel do micro (ajuste manualmente).
 - `--mic-noise-floor` (padrao 0.02) ruido de fundo a remover (0-0.5). Aumente para ignorar ruido constante.
 - `--mic-smoothing` (padrao 0.3) suavizacao exponencial do nivel (0-1). Maior = mais estavel, menos picos.
+- `--mic-auto-gain` ativa ajuste dinamico (por defeito esta desligado; use apenas se quiser que o ganho seja automatico).
 - `--button-pin` (padrao 17) GPIO do botao (BCM).
 - `--led-pin` (padrao 27) GPIO do LED (BCM).
 - `--camera` ativa a Camera Pi v2 (necessario para deteccao de rosto/emocao).

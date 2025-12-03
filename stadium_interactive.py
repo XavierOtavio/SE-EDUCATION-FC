@@ -401,14 +401,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mic-auto-gain",
         action="store_true",
-        default=True,
-        help="Ativa ajuste dinamico de ganho para aproveitar a escala (desative com --no-mic-auto-gain).",
-    )
-    parser.add_argument(
-        "--no-mic-auto-gain",
-        dest="mic_auto_gain",
-        action="store_false",
-        help="Desativa auto-gain.",
+        default=False,
+        help="Ativa ajuste dinamico de ganho (por defeito fica desligado; use mic-gain manual).",
     )
     parser.add_argument(
         "--mic-target-level",
