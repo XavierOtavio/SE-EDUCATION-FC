@@ -274,9 +274,7 @@ class PiBackend:
                 )
             self.camera = Picamera2()
             self.camera.set_controls({"AwbEnable": True, "AwbMode": 1}) 
-            config = self.camera.create_preview_configuration(
-                main={"size": resolution, "format": "RGB888"}
-            )
+            config = self.camera.create_preview_configuration({'format': 'RGB888'})
             self.camera.configure(config)
             self.camera.start()
             if wb_kelvin or color_gains:
