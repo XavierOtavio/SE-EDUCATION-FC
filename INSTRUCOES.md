@@ -13,6 +13,8 @@
 ```bash
 sudo apt update
 sudo apt install -y python3-gpiozero python3-opencv python3-picamera2 python3-pyaudio  # picamera2 so se quiser usar camera/display
+# Se faltar as cascatas do OpenCV (erro de haarcascades), instale:
+sudo apt install -y opencv-data
 ```
 
 ## Executar (modo basico, sem video)

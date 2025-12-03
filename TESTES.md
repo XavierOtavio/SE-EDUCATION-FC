@@ -3,7 +3,7 @@
 ## Preparacao
 - Confirmar que o microfone USB aparece em `arecord -l` ou `python - <<'PY'\nimport pyaudio\npa = pyaudio.PyAudio()\nfor i in range(pa.get_device_count()):\n    print(i, pa.get_device_info_by_index(i).get('name'))\npa.terminate()\nPY`.
 - Wiring: botao no GPIO17 (pull-down), LED no GPIO27 com resistor.
-- Instalar dependencias: `sudo apt update && sudo apt install -y python3-gpiozero python3-opencv python3-picamera2 python3-pyaudio` (picamera2 apenas se usar camera/display).
+- Instalar dependencias: `sudo apt update && sudo apt install -y python3-gpiozero python3-opencv opencv-data python3-picamera2 python3-pyaudio` (picamera2 apenas se usar camera/display).
 
 ## Checklist funcional
 1. **Arranque (sem video)**: `python stadium_interactive.py --interval 0.5` (sem `--display`/`--camera`). Ver se imprime leituras sem erros.

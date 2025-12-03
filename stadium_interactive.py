@@ -1,6 +1,7 @@
 import argparse
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import cv2
@@ -32,15 +33,42 @@ class EmotionDetector:
     """Deteta faces e estima emocao simples (sorriso -> Feliz; senao Neutro)."""
 
     def __init__(self) -> None:
-        cascades = cv2.data.haarcascades
+        cascades = self._cascade_dir()
         self.face_cascade = cv2.CascadeClassifier(
-            cascades + "haarcascade_frontalface_default.xml"
+            str(cascades / "haarcascade_frontalface_default.xml")
         )
         self.smile_cascade = cv2.CascadeClassifier(
-            cascades + "haarcascade_smile.xml"
+            str(cascades / "haarcascade_smile.xml")
         )
         if self.face_cascade.empty() or self.smile_cascade.empty():
             raise RuntimeError("Nao foi possivel carregar cascades do OpenCV.")
+
+    def _cascade_dir(self) -> Path:
+        """Resolve o diretorio das cascatas, mesmo quando cv2.data.haarcascades nao existe."""
+        candidates: List[Path] = []
+        try:
+            candidates.append(Path(cv2.data.haarcascades))
+        except Exception:
+            pass
+        try:
+            base = Path(cv2.__file__).resolve().parent
+            candidates.append(base / "data" / "haarcascades")
+        except Exception:
+            pass
+        candidates.extend(
+            [
+                Path("/usr/share/opencv4/haarcascades"),
+                Path("/usr/local/share/opencv4/haarcascades"),
+                Path("/usr/share/opencv/haarcascades"),
+                Path("/usr/local/share/opencv/haarcascades"),
+            ]
+        )
+        for c in candidates:
+            if (c / "haarcascade_frontalface_default.xml").exists():
+                return c
+        raise RuntimeError(
+            "Nao encontrei cascatas do OpenCV. Instale python3-opencv/opencv-data ou indique o caminho."
+        )
 
     def detect(self, frame_bgr) -> List[FaceEmotion]:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
