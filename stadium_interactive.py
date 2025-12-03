@@ -179,6 +179,7 @@ class PiBackend:
                     "picamera2 nao instalado; instale python3-picamera2 ou desative --camera/--display."
                 )
             self.camera = Picamera2()
+            self.camera.set_controls({"AwbEnable": True, "AwbMode": 1}) 
             config = self.camera.create_preview_configuration(
                 main={"size": resolution, "format": "RGB888"}
             )
@@ -264,6 +265,8 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             frame = backend.capture_frame() if display else None
             if frame is not None:
                 frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # Camera montada invertida: rodar 180 graus para corrigir orientacao.
+                frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
                 faces = backend.detect_emotions(frame_bgr)
                 draw_overlay(frame_bgr, faces, noise, pressure, message)
                 cv2.imshow(WINDOW_NAME, frame_bgr)
