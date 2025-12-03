@@ -31,6 +31,7 @@ python stadium_interactive.py --display --camera --interval 0.1  --mic-samplerat
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --color-gains 1.8,1.2
 # Exemplo combinando Kelvin + gains:
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --wb-kelvin 4500 --color-gains 1.4,1.0
+# Sem overrides, o default aplica um tom mais quente (ColourTemperature 5200 e gains 1.6,1.0) para melhorar vermelhos.
 # Exemplo sem microfone (ruido=0):
 # python stadium_interactive.py --display --camera --interval 0.1 --no-mic-enabled
 ```

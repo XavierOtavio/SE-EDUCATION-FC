@@ -287,8 +287,14 @@ class PiBackend:
                     controls["ColourGains"] = color_gains
                 self.camera.set_controls(controls)
             else:
-                # Mantem AWB ligado se nao houver configuracao manual.
-                self.camera.set_controls({"AwbEnable": True})
+                # Default mais quente para melhorar vermelhos em ausencia de configuracao manual.
+                self.camera.set_controls(
+                    {
+                        "AwbEnable": False,
+                        "ColourTemperature": 5200,
+                        "ColourGains": (1.6, 1.0),
+                    }
+                )
             self.detector = EmotionDetector()
 
         time.sleep(0.05)
