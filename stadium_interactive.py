@@ -292,7 +292,7 @@ class PiBackend:
     def capture_frame(self):
         if not self.camera:
             return None
-        return self.camera.capture_array("main")
+        return self.camera.capture_array()
 
     def detect_emotions(self, frame_bgr) -> List[FaceEmotion]:
         if not self.detector or frame_bgr is None:
@@ -355,9 +355,8 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
 
             frame = backend.capture_frame() if display else None
             if frame is not None:
-                frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 # Camera montada invertida: rodar 180 graus para corrigir orientacao.
-                frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
+                frame_bgr = cv2.rotate(frame, cv2.ROTATE_180)
                 faces = backend.detect_emotions(frame_bgr)
                 draw_overlay(frame_bgr, faces, noise, pressure, message)
                 cv2.imshow(WINDOW_NAME, frame_bgr)
