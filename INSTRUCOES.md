@@ -8,7 +8,7 @@
 - Camera Pi v2 (opcional, para deteccao de rostos/emocoes e overlay em video)
 
 ## Preparacao do sistema
-1) Confirmar que o microfone USB e detetado: `arecord -l` ou `python - <<'PY'\nimport sounddevice as sd\nprint(sd.query_devices())\nPY`
+1) Confirmar que o microfone USB e detetado: `arecord -l` ou use o snippet abaixo (PyAudio).
 2) Instalar dependencias:
 ```bash
 sudo apt update
@@ -22,12 +22,12 @@ python stadium_interactive.py --interval 0.5
 
 ## Executar com video/emocoes
 ```bash
-python stadium_interactive.py --display --camera --interval 0.1
+python stadium_interactive.py --display --camera --interval 0.1  --mic-samplerate 44100
 ```
 
 Argumentos uteis:
 - `--mic-device` indice do microfone (None usa o padrao; veja lista pelo pyaudio no snippet abaixo).
-- `--mic-samplerate` (padrao 16000) taxa de amostragem de audio.
+- `--mic-samplerate` (padrao 16000) taxa de amostragem de audio (tente 44100 se tiver erro de sample rate).
 - `--mic-frames` (padrao 1024) amostras lidas por ciclo (mais alto = leitura mais lenta/pouco ruido).
 - `--button-pin` (padrao 17) GPIO do botao (BCM).
 - `--led-pin` (padrao 27) GPIO do LED (BCM).

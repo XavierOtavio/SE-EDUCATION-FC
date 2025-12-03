@@ -62,15 +62,46 @@ class AudioLevelReader:
     def __init__(self, device_index: Optional[int], samplerate: int, frames: int) -> None:
         self.frames = frames
         self.pa = pyaudio.PyAudio()
-        self.stream = self.pa.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=samplerate,
-            input=True,
-            frames_per_buffer=frames,
-            input_device_index=device_index,
-        )
+        self.stream = self._open_stream(device_index, samplerate, frames)
         self.max_int = float(np.iinfo(np.int16).max)
+
+    def _open_stream(
+        self, device_index: Optional[int], samplerate: int, frames: int
+    ) -> pyaudio.Stream:
+        """
+        Tenta abrir stream com o sample rate pedido; se falhar, tenta taxas comuns
+        (48000, 44100, 16000) e a taxa default do dispositivo.
+        """
+        candidates = [samplerate, 48000, 44100, 16000]
+        try:
+            dev_info = (
+                self.pa.get_device_info_by_index(device_index)
+                if device_index is not None
+                else self.pa.get_default_input_device_info()
+            )
+            default_rate = int(dev_info.get("defaultSampleRate", samplerate))
+            if default_rate not in candidates:
+                candidates.append(default_rate)
+        except Exception:
+            pass
+
+        last_err: Optional[Exception] = None
+        for rate in candidates:
+            try:
+                return self.pa.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=rate,
+                    input=True,
+                    frames_per_buffer=frames,
+                    input_device_index=device_index,
+                )
+            except Exception as err:  # pragma: no cover - depende de hardware
+                last_err = err
+                continue
+        raise RuntimeError(
+            f"Nao foi possivel abrir microfone com taxas {candidates}. Ultimo erro: {last_err}"
+        )
 
     def read_level(self) -> int:
         # Leitura bloqueante curta; converte RMS (0-32767) para 0-1023 com ganho moderado.

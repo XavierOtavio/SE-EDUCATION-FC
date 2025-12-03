@@ -11,14 +11,14 @@
 3. **Ruido alto + botao pressionado**: Bater palmas/falar alto e pressionar botao -> LED acende e `GOLO`.
 4. **Ruido alto + botao solto**: Com ruido alto, soltar botao -> LED apaga e `VAIA`.
 5. **Alternancia rapida**: Alternar botao durante ruido alto e confirmar reacao imediata do LED/estado.
-6. **Display + emocoes**: `python stadium_interactive.py --display --camera --interval 0.1`. Confirmar:
+6. **Display + emocoes**: `python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100`. Confirmar:
    - Janela com rostos, bounding boxes e emocao (Feliz se sorriso, Neutro se nao).
    - Overlay com `Ruido`, `Pressao` e `Estado` visivel no frame.
    - LED fisico corresponde ao estado (GOLO/VAIA/Entusiasmo normal).
 7. **Fecho limpo**: Premir `q` na janela ou `Ctrl+C` no terminal; confirmar que a app fecha sem stack trace e liberta GPIO/camera.
 
 ## Diagnostico rapido
-- Se erro de dispositivo/entrada no pyaudio: verificar argumento `--mic-device` e lista de dispositivos.
+- Se erro de dispositivo/entrada no pyaudio: verificar argumento `--mic-device`, `--mic-samplerate` (tentar 44100) e lista de dispositivos.
 - Se o botao nunca muda: rever pull-down/pull-up e pino configurado.
 - Se o LED fica sempre ON/OFF: testar `--led-pin` correto e rever resistor/ligacao.
 - Se a janela nao abre: confirmar `--display` e ambiente grafico; em headless, usar virtual display ou remover `--display`.
