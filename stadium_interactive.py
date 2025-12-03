@@ -92,18 +92,20 @@ class EmotionDetector:
             eyes = self.eye_cascade.detectMultiScale(
                 roi_gray, scaleFactor=1.1, minNeighbors=6
             )
-            emotion = self._classify(smiles, eyes)
+            mean_intensity = float(cv2.mean(roi_gray)[0])
+            emotion = self._classify(smiles, eyes, mean_intensity)
             results.append(FaceEmotion(x, y, w, h, emotion))
         return results
 
-    def _classify(self, smiles, eyes) -> str:
+    def _classify(self, smiles, eyes, mean_intensity: float) -> str:
         has_smile = len(smiles) > 0
         has_eyes = len(eyes) > 0
         if has_smile:
             return "Feliz"
-        if has_eyes:
-            return "Triste"
-        return "Zangado"
+        # Heuristica simples: se esta escuro ou olhos nao aparecem, marcar como Zangado.
+        if not has_eyes or mean_intensity < 70:
+            return "Zangado"
+        return "Triste"
 
 
 class AudioLevelReader:
