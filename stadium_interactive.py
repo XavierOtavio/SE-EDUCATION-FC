@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from unittest import result
 
 import cv2
 import numpy as np
@@ -94,20 +95,23 @@ class EmotionDetector:
             eyes = self.eye_cascade.detectMultiScale(
                 roi_gray, scaleFactor=1.1, minNeighbors=6
             )
-            mean_intensity = float(cv2.mean(roi_gray)[0])
+            if roi_gray.size > 0:
+                mean_intensity = float(cv2.mean(roi_gray)[0])
+            else:
+                mean_intensity = 128.0
             emotion = self._classify(smiles, eyes, mean_intensity)
             results.append(FaceEmotion(x, y, w, h, emotion))
         return results
 
-def _classify(self, smiles, eyes, mean_intensity: float) -> str:
-    has_smile = len(smiles) > 0
-    has_eyes = len(eyes) > 0
-    if has_smile:
-        return "Feliz"
-    # Heuristica simples: se esta escuro ou olhos nao aparecem, marcar como Zangado.
-    if not has_eyes or mean_intensity < 90:
-        return "Zangado"
-    return "Triste"
+    def _classify(self, smiles, eyes, mean_intensity: float) -> str:
+        has_smile = len(smiles) > 0
+        has_eyes = len(eyes) > 0
+        if has_smile:
+            return "Feliz"
+        # Heuristica simples: se esta escuro ou olhos nao aparecem, marcar como Zangado.
+        if not has_eyes or mean_intensity < 90:
+            return "Zangado"
+        return "Triste"
 
 
 def dominant_color(frame_bgr, k: int = 3) -> Tuple[int, int, int]:
@@ -116,8 +120,12 @@ def dominant_color(frame_bgr, k: int = 3) -> Tuple[int, int, int]:
     Usa imagem reduzida para reduzir custo.
     """
     try:
+        if frame_bgr is None or frame_bgr.size == 0:
+            raise ValueError("Frame vazio")
         small = cv2.resize(frame_bgr, (80, 80))
         data = small.reshape((-1, 3)).astype(np.float32)
+        if data.shape[0] < k:
+            raise ValueError("Dados insuficientes para k-means")
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
         _, labels, centers = cv2.kmeans(
             data, k, None, criteria, 5, cv2.KMEANS_PP_CENTERS
