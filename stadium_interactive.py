@@ -114,15 +114,28 @@ class EmotionDetector:
         return "Triste"
 
 
-def dominant_color(frame_bgr, k: int = 3) -> Tuple[int, int, int]:
+def dominant_color(frame_bgr, faces: List[FaceEmotion], k: int = 3) -> Tuple[int, int, int]:
     """
-    Estima a cor predominante do frame (usando k-means) e devolve BGR.
-    Usa imagem reduzida para reduzir custo.
+    Estima a cor predominante das camisolas: usa regi��o de tronco abaixo da face
+    mais larga. Se n�o houver faces, usa o frame inteiro.
     """
     try:
         if frame_bgr is None or frame_bgr.size == 0:
             raise ValueError("Frame vazio")
-        small = cv2.resize(frame_bgr, (80, 80))
+        h, w, _ = frame_bgr.shape
+        if faces:
+            # Escolher face mais larga e inferir tronco abaixo.
+            face = max(faces, key=lambda f: f.w)
+            x1 = max(0, int(face.x - 0.2 * face.w))
+            x2 = min(w, int(face.x + 1.2 * face.w))
+            y1 = min(h, int(face.y + face.h))  # abaixo do queixo
+            y2 = min(h, int(face.y + 2.5 * face.h))  # estender pelo tronco
+            roi = frame_bgr[y1:y2, x1:x2]
+            if roi.size == 0:
+                roi = frame_bgr
+        else:
+            roi = frame_bgr
+        small = cv2.resize(roi, (80, 80))
         data = small.reshape((-1, 3)).astype(np.float32)
         if data.shape[0] < k:
             raise ValueError("Dados insuficientes para k-means")
@@ -414,7 +427,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 # Camera montada invertida: rodar 180 graus para corrigir orientacao.
                 frame_rgb = cv2.rotate(frame, cv2.ROTATE_180)
                 faces = backend.detect_emotions(frame_rgb)
-                team_color = dominant_color(frame_rgb)
+                team_color = dominant_color(frame_rgb, faces)
                 draw_overlay(frame_rgb, faces, noise, pressure, message, team_color)
                 cv2.imshow(WINDOW_NAME, frame_rgb)
                 if cv2.waitKey(1) & 0xFF == ord("q"):

@@ -53,7 +53,7 @@ Argumentos uteis:
 - `--wb-kelvin` fixa o balanco de brancos em Kelvin (ex.: 4500). Se omitir, usa default quente (5200 + gains 1.6,1.0).
 - `--color-gains` fixa gains R,B (ex.: `1.8,1.2`) e desativa AWB. Pode combinar com `--wb-kelvin`; ambos sao aplicados.
 - Dica deteccao de rosto: boa luz e face preenchendo parte do frame; o script usa CLAHE e parametros mais permissivos para captar rostos (inclui Zangado/Triste/Feliz; para Zangado evite sorrir e mantenha rosto mais serio/escuro).
-- Quadrado de cor da equipa: canto inferior direito mostra a cor predominante das camisolas (cor dominante do frame).
+- Quadrado de cor da equipa: canto inferior direito mostra a cor predominante das camisolas (usando a zona do tronco abaixo da face detetada; se nenhuma face, usa o frame inteiro).
 
 Listar dispositivos de microfone rapidamente:
 ```bash
