@@ -187,13 +187,15 @@ class PiBackend:
             )
             self.camera.configure(config)
             self.camera.start()
-            if color_gains:
-                self.camera.set_controls({"AwbEnable": False, "ColourGains": color_gains})
-            elif wb_kelvin:
-                # Desliga AWB automatico e fixa a temperatura de cor em Kelvin.
-                self.camera.set_controls({"AwbEnable": False, "ColourTemperature": wb_kelvin})
+            if wb_kelvin or color_gains:
+                controls = {"AwbEnable": False}
+                if wb_kelvin:
+                    controls["ColourTemperature"] = wb_kelvin
+                if color_gains:
+                    controls["ColourGains"] = color_gains
+                self.camera.set_controls(controls)
             else:
-                # Mantem AWB ligado se nao for especificado Kelvin.
+                # Mantem AWB ligado se nao houver configuracao manual.
                 self.camera.set_controls({"AwbEnable": True})
             self.detector = EmotionDetector()
 

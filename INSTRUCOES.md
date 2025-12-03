@@ -29,6 +29,8 @@ python stadium_interactive.py --display --camera --interval 0.1  --mic-samplerat
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --wb-kelvin 4500
 # Exemplo com gains manuais (ajustar tons de pele):
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --color-gains 1.8,1.2
+# Exemplo combinando Kelvin + gains:
+# python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --wb-kelvin 4500 --color-gains 1.4,1.0
 ```
 
 Argumentos uteis:
@@ -41,7 +43,7 @@ Argumentos uteis:
 - `--display` mostra janela com frame, emocao, ruido, pressao e estado.
 - `--resolution` (ex.: `1280x720`) define a resolucao do feed de camera.
 - `--wb-kelvin` fixa o balanço de brancos em Kelvin (ex.: 4500). Se omitir, usa AWB automatico.
-- `--color-gains` fixa gains R,B (ex.: `1.8,1.2`) e desativa AWB. Use para corrigir tons azulados/amarelados.
+- `--color-gains` fixa gains R,B (ex.: `1.8,1.2`) e desativa AWB. Pode combinar com `--wb-kelvin`; ambos sao aplicados.
 
 Listar dispositivos de microfone rapidamente:
 ```bash
