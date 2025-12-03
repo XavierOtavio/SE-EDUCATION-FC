@@ -165,6 +165,7 @@ class PiBackend:
         display: bool,
         resolution: Tuple[int, int],
         wb_kelvin: Optional[int],
+        color_gains: Optional[Tuple[float, float]],
     ) -> None:
         self.audio = AudioLevelReader(mic_device, mic_samplerate, mic_frames)
         self.button = Button(button_pin, pull_up=False)
@@ -186,7 +187,9 @@ class PiBackend:
             )
             self.camera.configure(config)
             self.camera.start()
-            if wb_kelvin:
+            if color_gains:
+                self.camera.set_controls({"AwbEnable": False, "ColourGains": color_gains})
+            elif wb_kelvin:
                 # Desliga AWB automatico e fixa a temperatura de cor em Kelvin.
                 self.camera.set_controls({"AwbEnable": False, "ColourTemperature": wb_kelvin})
             else:
@@ -354,6 +357,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Define temperatura de cor fixa em Kelvin (ex.: 4500). Se nao for usada, AWB fica automatico.",
     )
+    parser.add_argument(
+        "--color-gains",
+        default=None,
+        help="Gains de cor manual no formato R,B (ex.: 1.8,1.2). Desativa AWB se definido.",
+    )
     return parser.parse_args()
 
 
@@ -365,9 +373,20 @@ def parse_resolution(res_str: str) -> Tuple[int, int]:
         raise argparse.ArgumentTypeError("Resolucao deve ser no formato LxA, ex.: 640x480") from exc
 
 
+def parse_color_gains(gains_str: Optional[str]) -> Optional[Tuple[float, float]]:
+    if gains_str is None:
+        return None
+    try:
+        r_str, b_str = gains_str.split(",")
+        return float(r_str), float(b_str)
+    except Exception as exc:  # pragma: no cover - validacao simples
+        raise argparse.ArgumentTypeError("Color gains deve ser 'R,B', ex.: 1.8,1.2") from exc
+
+
 def main() -> None:
     args = parse_args()
     width, height = parse_resolution(args.resolution)
+    color_gains = parse_color_gains(args.color_gains)
     backend = PiBackend(
         mic_device=args.mic_device,
         mic_samplerate=args.mic_samplerate,
@@ -378,6 +397,7 @@ def main() -> None:
         display=args.display,
         resolution=(width, height),
         wb_kelvin=args.wb_kelvin,
+        color_gains=color_gains,
     )
     run_loop(backend, args.interval, args.display)
 
