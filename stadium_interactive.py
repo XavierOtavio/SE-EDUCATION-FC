@@ -413,11 +413,10 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             if frame is not None:
                 # Camera montada invertida: rodar 180 graus para corrigir orientacao.
                 frame_rgb = cv2.rotate(frame, cv2.ROTATE_180)
-                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-                faces = backend.detect_emotions(frame_bgr)
-                team_color = dominant_color(frame_bgr)
-                draw_overlay(frame_bgr, faces, noise, pressure, message, team_color)
-                cv2.imshow(WINDOW_NAME, frame_bgr)
+                faces = backend.detect_emotions(frame_rgb)
+                team_color = dominant_color(frame_rgb)
+                draw_overlay(frame_rgb, faces, noise, pressure, message, team_color)
+                cv2.imshow(WINDOW_NAME, frame_rgb)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
             else:
