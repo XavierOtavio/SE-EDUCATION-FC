@@ -2,7 +2,7 @@
 
 ## Requisitos
 - Raspberry Pi com Raspberry Pi OS
-- Microfone USB (para nivel de ruido)
+- Microfone USB (para nivel de ruido) – opcional se usar `--no-mic-enabled`
 - Botao em GPIO17 (BCM) com resistor pull-down (ou ajuste para pull-up no codigo)
 - LED em GPIO27 (BCM) com resistor
 - Camera Pi v2 (opcional, para deteccao de rostos/emocoes e overlay em video)
@@ -24,14 +24,14 @@ python stadium_interactive.py --interval 0.5
 
 ## Executar com video/emocoes
 ```bash
-python stadium_interactive.py --display --camera --interval 0.1  --mic-samplerate 44100
-# Exemplo com balanço de brancos fixo:
+python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100
+# Exemplo com balanco de brancos fixo:
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --wb-kelvin 4500
 # Exemplo com gains manuais (ajustar tons de pele):
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --color-gains 1.8,1.2
 # Exemplo combinando Kelvin + gains:
 # python stadium_interactive.py --display --camera --interval 0.1 --mic-samplerate 44100 --wb-kelvin 4500 --color-gains 1.4,1.0
-# Sem overrides, o default aplica um tom mais quente (ColourTemperature 5200 e gains 1.6,1.0) para melhorar vermelhos.
+# Sem overrides, o default aplica tom mais quente (ColourTemperature 5200 e gains 1.6,1.0) para melhorar vermelhos.
 # Exemplo sem microfone (ruido=0):
 # python stadium_interactive.py --display --camera --interval 0.1 --no-mic-enabled
 ```
@@ -50,8 +50,9 @@ Argumentos uteis:
 - `--camera` ativa a Camera Pi v2 (necessario para deteccao de rosto/emocao).
 - `--display` mostra janela com frame, emocao, ruido, pressao e estado.
 - `--resolution` (ex.: `1280x720`) define a resolucao do feed de camera.
-- `--wb-kelvin` fixa o balanço de brancos em Kelvin (ex.: 4500). Se omitir, usa AWB automatico.
+- `--wb-kelvin` fixa o balanco de brancos em Kelvin (ex.: 4500). Se omitir, usa default quente (5200 + gains 1.6,1.0).
 - `--color-gains` fixa gains R,B (ex.: `1.8,1.2`) e desativa AWB. Pode combinar com `--wb-kelvin`; ambos sao aplicados.
+- Dica deteccao de rosto: boa luz e face preenchendo parte do frame; o script usa CLAHE e parametros mais permissivos para captar rostos (inclui Zangado/Triste/Feliz).
 
 Listar dispositivos de microfone rapidamente:
 ```bash
@@ -73,13 +74,13 @@ PY
   Ruido= 200 | Pressao=False | LED=OFF | Entusiasmo normal
   ```
 - Com `--display --camera`: janela de video com:
-  - Rostos com bounding boxes e emocao (Feliz se sorriso detetado, Neutro caso contrario).
+  - Rostos com bounding boxes e emocao (Feliz, Triste ou Zangado simples).
   - Texto no topo com `Ruido`, `Pressao` e `Estado (GOLO/VAIA/Entusiasmo normal)`.
   - LED fisico segue o mesmo estado.
   - Premir `q` para fechar a janela.
 
 ## Criterios de aceitacao cobertos
-- Leitura real do nivel de ruido (0-1023) via microfone USB e do botao (True/False).
+- Leitura real do nivel de ruido (0-1023) via microfone USB e do botao (True/False) – ou ruido 0 se `--no-mic-enabled`.
 - Logica:
   - Ruido > 512 e botao pressionado: LED ON e mensagem `GOLO`.
   - Ruido > 512 e botao nao pressionado: LED OFF e mensagem `VAIA`.

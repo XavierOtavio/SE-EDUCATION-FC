@@ -46,6 +46,7 @@ class EmotionDetector:
         self.smile_cascade = cv2.CascadeClassifier(
             str(cascades / "haarcascade_smile.xml")
         )
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         if self.face_cascade.empty() or self.smile_cascade.empty() or self.eye_cascade.empty():
             raise RuntimeError("Nao foi possivel carregar cascades do OpenCV.")
 
@@ -78,15 +79,18 @@ class EmotionDetector:
 
     def detect(self, frame_bgr) -> List[FaceEmotion]:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5)
+        gray = self.clahe.apply(gray)
+        faces = self.face_cascade.detectMultiScale(
+            gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60)
+        )
         results: List[FaceEmotion] = []
         for (x, y, w, h) in faces:
             roi_gray = gray[y : y + h, x : x + w]
             smiles = self.smile_cascade.detectMultiScale(
-                roi_gray, scaleFactor=1.7, minNeighbors=20
+                roi_gray, scaleFactor=1.5, minNeighbors=15
             )
             eyes = self.eye_cascade.detectMultiScale(
-                roi_gray, scaleFactor=1.1, minNeighbors=10
+                roi_gray, scaleFactor=1.1, minNeighbors=6
             )
             emotion = self._classify(smiles, eyes)
             results.append(FaceEmotion(x, y, w, h, emotion))
