@@ -12,7 +12,7 @@
 2) Instalar dependencias:
 ```bash
 sudo apt update
-sudo apt install -y python3-gpiozero python3-opencv python3-picamera2 python3-sounddevice  # picamera2 so se quiser usar camera/display
+sudo apt install -y python3-gpiozero python3-opencv python3-picamera2 python3-pyaudio  # picamera2 so se quiser usar camera/display
 ```
 
 ## Executar (modo basico, sem video)
@@ -26,7 +26,7 @@ python stadium_interactive.py --display --camera --interval 0.1
 ```
 
 Argumentos uteis:
-- `--mic-device` indice do microfone (None usa o padrao; veja sd.query_devices()).
+- `--mic-device` indice do microfone (None usa o padrao; veja lista pelo pyaudio no snippet abaixo).
 - `--mic-samplerate` (padrao 16000) taxa de amostragem de audio.
 - `--mic-frames` (padrao 1024) amostras lidas por ciclo (mais alto = leitura mais lenta/pouco ruido).
 - `--button-pin` (padrao 17) GPIO do botao (BCM).
@@ -34,6 +34,18 @@ Argumentos uteis:
 - `--camera` ativa a Camera Pi v2 (necessario para deteccao de rosto/emocao).
 - `--display` mostra janela com frame, emocao, ruido, pressao e estado.
 - `--resolution` (ex.: `1280x720`) define a resolucao do feed de camera.
+
+Listar dispositivos de microfone rapidamente:
+```bash
+python - <<'PY'
+import pyaudio
+pa = pyaudio.PyAudio()
+for i in range(pa.get_device_count()):
+    info = pa.get_device_info_by_index(i)
+    print(i, info.get('name'))
+pa.terminate()
+PY
+```
 
 ## O que vera
 - Sem `--display`: linhas no terminal, ex.:

@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-import sounddevice as sd
+import pyaudio
 from gpiozero import Button, LED
 
 try:
@@ -59,24 +59,35 @@ class EmotionDetector:
 class AudioLevelReader:
     """Le nivel de audio de um microfone USB e devolve escala 0-1023."""
 
-    def __init__(self, device: Optional[int], samplerate: int, frames: int) -> None:
-        self.device = device
-        self.samplerate = samplerate
+    def __init__(self, device_index: Optional[int], samplerate: int, frames: int) -> None:
         self.frames = frames
+        self.pa = pyaudio.PyAudio()
+        self.stream = self.pa.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=samplerate,
+            input=True,
+            frames_per_buffer=frames,
+            input_device_index=device_index,
+        )
+        self.max_int = float(np.iinfo(np.int16).max)
 
     def read_level(self) -> int:
-        # Leitura bloqueante curta; converte RMS (0-1) para 0-1023 com ganho moderado.
-        data = sd.rec(
-            self.frames,
-            samplerate=self.samplerate,
-            channels=1,
-            blocking=True,
-            device=self.device,
-            dtype="float32",
-        )
-        rms = float(np.sqrt(np.mean(np.square(data))))
-        level = int(min(NOISE_MAX, rms * NOISE_MAX * 4))  # ganho para sensibilidade
+        # Leitura bloqueante curta; converte RMS (0-32767) para 0-1023 com ganho moderado.
+        data = self.stream.read(self.frames, exception_on_overflow=False)
+        samples = np.frombuffer(data, dtype=np.int16)
+        if samples.size == 0:
+            return 0
+        rms = float(np.sqrt(np.mean(np.square(samples))))
+        level = int(min(NOISE_MAX, (rms / self.max_int) * NOISE_MAX * 2))  # ganho x2
         return level
+
+    def close(self) -> None:
+        try:
+            self.stream.stop_stream()
+            self.stream.close()
+        finally:
+            self.pa.terminate()
 
 
 class PiBackend:
@@ -142,6 +153,7 @@ class PiBackend:
             self.camera.stop()
         self.button.close()
         self.led.close()
+        self.audio.close()
 
 
 def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
