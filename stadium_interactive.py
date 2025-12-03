@@ -98,6 +98,7 @@ class AudioLevelReader:
         auto_gain: bool,
         target_level: float,
         peak_decay: float,
+        max_gain: float,
     ) -> None:
         self.frames = frames
         self.gain = gain
@@ -106,6 +107,7 @@ class AudioLevelReader:
         self.auto_gain = auto_gain
         self.target_level = max(0.1, min(1.0, target_level))
         self.peak_decay = max(0.0, min(1.0, peak_decay))
+        self.max_gain = max(0.1, max_gain)
         self.rolling_peak = 0.1
         self.prev_level: Optional[int] = None
         self.pa = pyaudio.PyAudio()
@@ -151,29 +153,25 @@ class AudioLevelReader:
         )
 
     def read_level(self) -> int:
-        # Leitura bloqueante curta; converte RMS (0-32767) para 0-1023 com ganho moderado.
         data = self.stream.read(self.frames, exception_on_overflow=False)
         samples = np.frombuffer(data, dtype=np.int16)
         if samples.size == 0:
             return 0
         rms = float(np.sqrt(np.mean(np.square(samples))))
         rms_norm = rms / self.max_int
-        # Remove ruído de fundo (floor) e aplica ganho.
         if rms_norm > self.noise_floor:
-            rms_norm = (rms_norm - self.noise_floor) / (1 - self.noise_floor)
+            rms_norm = (rms_norm - self.noise_floor) / max(1e-6, (1 - self.noise_floor))
         else:
             rms_norm = 0.0
-        # Auto-gain dinamico para aproveitar a escala.
         if self.auto_gain:
             self.rolling_peak = max(rms_norm, self.rolling_peak * self.peak_decay)
             dyn_gain = self.gain
-            if self.rolling_peak > 0:
+            if self.rolling_peak > 1e-6:
                 dyn_gain *= self.target_level / self.rolling_peak
+            dyn_gain = min(dyn_gain, self.max_gain)
         else:
             dyn_gain = self.gain
-
         level_raw = int(min(NOISE_MAX, rms_norm * dyn_gain * NOISE_MAX))
-
         if self.smoothing <= 0:
             level_smooth = level_raw
         else:
@@ -181,9 +179,7 @@ class AudioLevelReader:
                 level_smooth = level_raw
             else:
                 alpha = self.smoothing
-                level_smooth = int(
-                    self.prev_level + alpha * (level_raw - self.prev_level)
-                )
+                level_smooth = int(self.prev_level + alpha * (level_raw - self.prev_level))
         self.prev_level = level_smooth
         return level_smooth
 
@@ -211,6 +207,7 @@ class PiBackend:
         mic_auto_gain: bool,
         mic_target_level: float,
         mic_peak_decay: float,
+        mic_max_gain: float,
         button_pin: int,
         led_pin: int,
         use_camera: bool,
@@ -229,6 +226,7 @@ class PiBackend:
             mic_auto_gain,
             mic_target_level,
             mic_peak_decay,
+            mic_max_gain,
         )
         self.button = Button(button_pin, pull_up=False)
         self.led = LED(led_pin)
@@ -425,6 +423,12 @@ def parse_args() -> argparse.Namespace:
         help="Fator de decaimento do pico (0-1) para o auto-gain.",
     )
     parser.add_argument(
+        "--mic-max-gain",
+        type=float,
+        default=8.0,
+        help="Limite superior do ganho dinamico (auto-gain) para evitar saturar.",
+    )
+    parser.add_argument(
         "--button-pin",
         type=int,
         default=17,
@@ -503,6 +507,7 @@ def main() -> None:
         mic_auto_gain=args.mic_auto_gain,
         mic_target_level=args.mic_target_level,
         mic_peak_decay=args.mic_peak_decay,
+        mic_max_gain=args.mic_max_gain,
         button_pin=args.button_pin,
         led_pin=args.led_pin,
         use_camera=args.camera or args.display,
@@ -516,3 +521,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
