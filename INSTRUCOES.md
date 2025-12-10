@@ -54,6 +54,7 @@ Argumentos uteis:
 - `--color-gains` fixa gains R,B (ex.: `1.8,1.2`) e desativa AWB. Pode combinar com `--wb-kelvin`; ambos sao aplicados.
 - Dica deteccao de rosto: boa luz e face preenchendo parte do frame; o script usa CLAHE e parametros mais permissivos para captar rostos (inclui Zangado/Triste/Feliz; para Zangado evite sorrir e mantenha rosto mais serio/escuro).
 - Quadrado de cor da equipa: canto inferior direito mostra a cor predominante das camisolas (usando a zona do tronco abaixo da face detetada; se nenhuma face, usa o frame inteiro).
+- `--ble-enabled` ativa envio BLE da cor da equipa; use `--ble-device` para definir o MAC (padrao `BE:60:B4:00:48:B2`) e `--ble-uuid` (padrao `0000fff3-0000-1000-8000-00805f9b34fb`). Logs aparecem com prefixo [BLE] a indicar ligacao/envio.
 
 Listar dispositivos de microfone rapidamente:
 ```bash

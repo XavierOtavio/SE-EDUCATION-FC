@@ -24,6 +24,7 @@ THRESHOLD = 512
 WINDOW_NAME = "Estadio Interativo"
 TEAM_BOX_SIZE = 60
 TEAM_BOX_MARGIN = 10
+DEFAULT_BLE_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
 
 
 @dataclass
@@ -270,6 +271,46 @@ class DummyAudioLevelReader:
         return 0
 
 
+class BLEController:
+    """Envia cor via BLE e regista logs de estado de ligacao."""
+
+    def __init__(self, device_mac: str, write_uuid: str, enabled: bool) -> None:
+        self.device_mac = device_mac
+        self.write_uuid = write_uuid
+        self.enabled = enabled and BleakClient is not None
+        self.last_color: Optional[Tuple[int, int, int]] = None
+        if enabled and BleakClient is None:
+            print("[BLE] bleak nao instalado; desative BLE ou instale bleak.")
+
+    async def _send_async(self, r: int, g: int, b: int) -> None:
+        if not self.enabled:
+            return
+        print(f"[BLE] A ligar a {self.device_mac}...")
+        try:
+            async with BleakClient(self.device_mac) as client:
+                if not client.is_connected:
+                    print("[BLE] Falha ao ligar. Verifique o controlador.")
+                    return
+                print("[BLE] Ligado. A enviar cor...")
+                cmd = bytes([0x7E, 0x00, 0x05, 0x03, r, g, b, 0x00, 0xEF])
+                await client.write_gatt_char(self.write_uuid, cmd)
+                print(f"[BLE] Cor enviada (R={r} G={g} B={b}).")
+        except Exception as exc:
+            print(f"[BLE] Erro ao enviar cor: {exc}")
+
+    def send_color(self, bgr: Tuple[int, int, int]) -> None:
+        if not self.enabled:
+            return
+        if bgr == self.last_color:
+            return
+        self.last_color = bgr
+        b, g, r = bgr
+        try:
+            asyncio.run(self._send_async(r, g, b))
+        except RuntimeError as exc:
+            print(f"[BLE] Erro ao correr loop asyncio: {exc}")
+
+
 class PiBackend:
     """
     Le sensores no Raspberry Pi: microfone USB para ruido, botao GPIO e LED, camera opcional.
@@ -288,6 +329,9 @@ class PiBackend:
         mic_peak_decay: float,
         mic_max_gain: float,
         mic_enabled: bool,
+        ble_device: str,
+        ble_uuid: str,
+        ble_enabled: bool,
         button_pin: int,
         led_pin: int,
         use_camera: bool,
@@ -317,6 +361,7 @@ class PiBackend:
         self.detector: Optional[EmotionDetector] = None
         self.camera: Optional[Picamera2] = None
         self.display = display
+        self.ble = BLEController(ble_device, ble_uuid, ble_enabled)
 
         if use_camera or display:
             if Picamera2 is None:
@@ -419,6 +464,7 @@ def draw_overlay(
 
 def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     print("A ler sensores no Raspberry Pi. Janela de video se display ativo. Ctrl+C para sair.")
+    last_team_color: Optional[Tuple[int, int, int]] = None
     try:
         while True:
             noise, pressure = backend.read()
@@ -431,6 +477,9 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 frame_rgb = cv2.rotate(frame, cv2.ROTATE_180)
                 faces = backend.detect_emotions(frame_rgb)
                 team_color = dominant_color(frame_rgb, faces)
+                if team_color != last_team_color:
+                    backend.ble.send_color(team_color)
+                    last_team_color = team_color
                 draw_overlay(frame_rgb, faces, noise, pressure, message, team_color)
                 cv2.imshow(WINDOW_NAME, frame_rgb)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -569,6 +618,21 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Gains de cor manual no formato R,B (ex.: 1.8,1.2). Desativa AWB se definido.",
     )
+    parser.add_argument(
+        "--ble-enabled",
+        action="store_true",
+        help="Ativa envio da cor da equipa para o LED via BLE.",
+    )
+    parser.add_argument(
+        "--ble-device",
+        default="BE:60:B4:00:48:B2",
+        help="MAC address do controlador BLE (ex.: BE:60:B4:00:48:B2).",
+    )
+    parser.add_argument(
+        "--ble-uuid",
+        default=DEFAULT_BLE_UUID,
+        help="UUID de escrita do controlador BLE.",
+    )
     return parser.parse_args()
 
 
@@ -613,6 +677,9 @@ def main() -> None:
         resolution=(width, height),
         wb_kelvin=args.wb_kelvin,
         color_gains=color_gains,
+        ble_device=args.ble_device,
+        ble_uuid=args.ble_uuid,
+        ble_enabled=args.ble_enabled,
     )
     run_loop(backend, args.interval, args.display)
 
