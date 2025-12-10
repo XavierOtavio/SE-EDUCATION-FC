@@ -171,6 +171,7 @@ class AudioLevelReader:
         max_gain: float,
     ) -> None:
         self.frames = frames
+        self.samplerate = samplerate
         self.gain = gain
         self.noise_floor = max(0.0, min(0.5, noise_floor))
         self.smoothing = max(0.0, min(1.0, smoothing))
@@ -222,11 +223,11 @@ class AudioLevelReader:
             f"Nao foi possivel abrir microfone com taxas {candidates}. Ultimo erro: {last_err}"
         )
 
-    def read_level(self) -> int:
+    def read_level(self) -> Tuple[int, float]:
         data = self.stream.read(self.frames, exception_on_overflow=False)
         samples = np.frombuffer(data, dtype=np.int16)
         if samples.size == 0:
-            return 0
+            return 0, 0.0
         rms = float(np.sqrt(np.mean(np.square(samples))))
         rms_norm = rms / self.max_int
         if rms_norm > self.noise_floor:
@@ -251,7 +252,14 @@ class AudioLevelReader:
                 alpha = self.smoothing
                 level_smooth = int(self.prev_level + alpha * (level_raw - self.prev_level))
         self.prev_level = level_smooth
-        return level_smooth
+        # FFT simples para pico de frequencia
+        samples_float = samples.astype(np.float32)
+        window = np.hanning(len(samples_float))
+        spectrum = np.fft.rfft(samples_float * window)
+        freqs = np.fft.rfftfreq(len(samples_float), d=1.0 / self.samplerate)
+        peak_idx = int(np.argmax(np.abs(spectrum)))
+        peak_freq = float(freqs[peak_idx]) if peak_idx < len(freqs) else 0.0
+        return level_smooth, peak_freq
 
     def close(self) -> None:
         try:
@@ -413,9 +421,9 @@ class PiBackend:
 
     def read(self) -> Tuple[int, bool]:
         """Ler ruido (0-1023) do microfone USB e estado do botao (True/False)."""
-        noise_scaled = self.audio.read_level()
+        noise_scaled, peak_freq = self.audio.read_level()
         pressure_val = self.button.is_pressed
-        return noise_scaled, bool(pressure_val)
+        return noise_scaled, bool(pressure_val), peak_freq
 
     def set_led(self, on: bool) -> None:
         self.led.on() if on else self.led.off()
@@ -448,6 +456,17 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
     return "Entusiasmo normal", False
 
 
+def classify_sound(peak_freq: float) -> str:
+    """
+    Heuristica simples: frequencias altas -> Grito; baixas -> Vaia; neutro caso contrario.
+    """
+    if peak_freq > 800:
+        return "Som: Grito agudo", "golo"
+    if peak_freq > 100 and peak_freq < 500:
+        return "Som: Vaia grave", "vaia"
+    return "Som: Neutro", "neutro"
+
+
 def draw_overlay(
     frame,
     faces: List[FaceEmotion],
@@ -455,6 +474,7 @@ def draw_overlay(
     pressure: bool,
     message: str,
     team_color: Tuple[int, int, int],
+    sound_label: str,
 ) -> None:
     """Desenha bounding boxes, emocao e info de ruido/pressao/estado no frame."""
     for f in faces:
@@ -480,6 +500,16 @@ def draw_overlay(
         2,
         cv2.LINE_AA,
     )
+    cv2.putText(
+        frame,
+        sound_label,
+        (10, 50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (200, 200, 0),
+        2,
+        cv2.LINE_AA,
+    )
     h, w, _ = frame.shape
     x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
     y1 = h - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
@@ -501,11 +531,26 @@ def draw_overlay(
 def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     print("A ler sensores no Raspberry Pi. Janela de video se display ativo. Ctrl+C para sair.")
     last_team_color: Optional[Tuple[int, int, int]] = None
+    override_color: Optional[Tuple[int, int, int]] = None
+    override_until: Optional[float] = None
     try:
         while True:
-            noise, pressure = backend.read()
+            now = time.time()
+            # Limpar override se expirou
+            if override_until and now > override_until:
+                override_color = None
+                override_until = None
+
+            noise, pressure, peak_freq = backend.read()
             message, led_on = decide(noise, pressure)
             backend.set_led(led_on)
+            sound_label, sound_kind = classify_sound(peak_freq)
+            if sound_kind == "golo":
+                override_color = (0, 255, 0)  # verde em BGR
+                override_until = now + 5.0
+            elif sound_kind == "vaia":
+                override_color = (0, 0, 255)  # vermelho em BGR
+                override_until = now + 5.0
 
             frame = backend.capture_frame() if display else None
             if frame is not None:
@@ -513,17 +558,18 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 frame_rgb = cv2.rotate(frame, cv2.ROTATE_180)
                 faces = backend.detect_emotions(frame_rgb)
                 team_color = dominant_color(frame_rgb, faces)
-                if team_color != last_team_color:
-                    backend.ble.send_color(team_color)
-                    last_team_color = team_color
-                draw_overlay(frame_rgb, faces, noise, pressure, message, team_color)
+                current_color = override_color or team_color
+                if current_color != last_team_color:
+                    backend.ble.send_color(current_color)
+                    last_team_color = current_color
+                draw_overlay(frame_rgb, faces, noise, pressure, message, current_color, sound_label)
                 cv2.imshow(WINDOW_NAME, frame_rgb)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
             else:
                 led_label = "ON " if led_on else "OFF"
                 print(
-                    f"Ruido={noise:4d} | Pressao={pressure!s:5} | LED={led_label} | {message}"
+                    f"Ruido={noise:4d} | Pressao={pressure!s:5} | LED={led_label} | {message} | {sound_label}"
                 )
             time.sleep(interval)
     except KeyboardInterrupt:
