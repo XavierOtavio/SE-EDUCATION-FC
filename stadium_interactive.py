@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
 
 NOISE_MIN = 0
 NOISE_MAX = 1023
-THRESHOLD = 512
+THRESHOLD = 200
 WINDOW_NAME = "Estadio Interativo"
 TEAM_BOX_SIZE = 60
 TEAM_BOX_MARGIN = 10
@@ -457,13 +457,10 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
 
 
 def classify_sound(noise_level: int, peak_freq: float) -> str:
-    """
-    Heurística melhorada para distinguir entre "goglo" e "vaia"
-    com base em frequências e níveis de ruído.
-    """
-    if peak_freq > 1500 and noise_level > 200:  # Grito ou som agudo
+    print(f"Peak Frequency: {peak_freq}, Noise Level: {noise_level}")  # Verifica os valores
+    if peak_freq > 1200 and noise_level > 150:  # Grito agudo
         return "Som: Grito agudo", "golo"
-    elif 80 < peak_freq < 400 and noise_level > 150:  # Vaia grave
+    elif 80 < peak_freq < 500 and noise_level > 120:  # Vaia grave
         return "Som: Vaia grave", "vaia"
     return "Som: Neutro", "neutro"
 
