@@ -540,6 +540,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             if override_until and now > override_until:
                 override_color = None
                 override_until = None
+                last_team_color = None  # forca reenviar cor da equipa
 
             noise, pressure, peak_freq = backend.read()
             message, led_on = decide(noise, pressure)
