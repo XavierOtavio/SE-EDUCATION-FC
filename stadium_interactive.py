@@ -458,11 +458,12 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
 
 def classify_sound(noise_level: int, peak_freq: float) -> str:
     """
-    Heuristica simples: frequencias altas + nivel alto -> Grito; baixas -> Vaia; neutro caso contrario.
+    Heurística melhorada para distinguir entre "goglo" e "vaia"
+    com base em frequências e níveis de ruído.
     """
-    if peak_freq > 1000 and noise_level > 150:
+    if peak_freq > 1500 and noise_level > 200:  # Grito ou som agudo
         return "Som: Grito agudo", "golo"
-    if 80 < peak_freq < 400 and noise_level > 120:
+    elif 80 < peak_freq < 400 and noise_level > 150:  # Vaia grave
         return "Som: Vaia grave", "vaia"
     return "Som: Neutro", "neutro"
 
