@@ -458,9 +458,15 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
 
 def classify_sound(noise_level: int, peak_freq: float) -> str:
     print(f"Peak Frequency: {peak_freq}, Noise Level: {noise_level}")  # Verifica os valores
-    if peak_freq > 1500 and noise_level > 60:  # Grito agudo ou "goglo"
+    # Mais permissivo: se o nivel bruto for alto, prioriza ruido.
+    if noise_level > 600:
+        return "Som: Grito/alto", "golo"
+    if noise_level > 250:
+        return "Som: Vaia/baixo", "vaia"
+    # Caso contrario, usa frequencia se houver pico definido.
+    if peak_freq > 600 and noise_level > 120:
         return "Som: Grito agudo", "golo"
-    elif 80 < peak_freq < 500 and noise_level > 30:  # Vaia grave
+    if 80 < peak_freq < 450 and noise_level > 80:
         return "Som: Vaia grave", "vaia"
     return "Som: Neutro", "neutro"
 
