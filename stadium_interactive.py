@@ -461,8 +461,8 @@ def classify_sound(noise_level: int, peak_freq: float) -> str:
     # Mais permissivo: se o nivel bruto for alto, prioriza ruido.
     if noise_level > 600:
         return "Som: Grito/alto", "golo"
-    if noise_level > 250:
-        return "Som: Vaia/baixo", "vaia"
+    if noise_level > 300:
+        return "Som: Vaia/ruido medio", "vaia"
     # Caso contrario, usa frequencia se houver pico definido.
     if peak_freq > 600 and noise_level > 120:
         return "Som: Grito agudo", "golo"
