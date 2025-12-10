@@ -3,8 +3,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from unittest import result
-
+import asyncio
 import cv2
 import numpy as np
 import pyaudio
@@ -14,6 +13,10 @@ try:
     from picamera2 import Picamera2
 except ImportError:  # pragma: no cover
     Picamera2 = None
+try:
+    from bleak import BleakClient
+except ImportError:  # pragma: no cover
+    BleakClient = None
 
 NOISE_MIN = 0
 NOISE_MAX = 1023
@@ -616,4 +619,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
