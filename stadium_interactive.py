@@ -279,24 +279,41 @@ class BLEController:
         self.write_uuid = write_uuid
         self.enabled = enabled and BleakClient is not None
         self.last_color: Optional[Tuple[int, int, int]] = None
+        self.client: Optional["BleakClient"] = None
         if enabled and BleakClient is None:
             print("[BLE] bleak nao instalado; desative BLE ou instale bleak.")
+
+    async def _ensure_client(self) -> bool:
+        if self.client and self.client.is_connected:
+            return True
+        try:
+            print(f"[BLE] A ligar a {self.device_mac}...")
+            self.client = BleakClient(self.device_mac)
+            await self.client.connect()
+            if not self.client.is_connected:
+                print("[BLE] Falha ao ligar. Verifique o controlador.")
+                self.client = None
+                return False
+            print("[BLE] Ligado.")
+            return True
+        except Exception as exc:
+            print(f"[BLE] Erro ao ligar: {exc}")
+            self.client = None
+            return False
 
     async def _send_async(self, r: int, g: int, b: int) -> None:
         if not self.enabled:
             return
-        print(f"[BLE] A ligar a {self.device_mac}...")
+        if not await self._ensure_client():
+            return
         try:
-            async with BleakClient(self.device_mac) as client:
-                if not client.is_connected:
-                    print("[BLE] Falha ao ligar. Verifique o controlador.")
-                    return
-                print("[BLE] Ligado. A enviar cor...")
-                cmd = bytes([0x7E, 0x00, 0x05, 0x03, r, g, b, 0x00, 0xEF])
-                await client.write_gatt_char(self.write_uuid, cmd)
-                print(f"[BLE] Cor enviada (R={r} G={g} B={b}).")
+            cmd = bytes([0x7E, 0x00, 0x05, 0x03, r, g, b, 0x00, 0xEF])
+            await self.client.write_gatt_char(self.write_uuid, cmd)
+            print(f"[BLE] Cor enviada (R={r} G={g} B={b}).")
         except Exception as exc:
             print(f"[BLE] Erro ao enviar cor: {exc}")
+            # força reconectar na proxima tentativa
+            self.client = None
 
     def send_color(self, bgr: Tuple[int, int, int]) -> None:
         if not self.enabled:
@@ -309,6 +326,24 @@ class BLEController:
             asyncio.run(self._send_async(r, g, b))
         except RuntimeError as exc:
             print(f"[BLE] Erro ao correr loop asyncio: {exc}")
+            self.client = None
+
+    async def _disconnect_async(self) -> None:
+        if self.client and self.client.is_connected:
+            try:
+                await self.client.disconnect()
+                print("[BLE] Desligado.")
+            except Exception as exc:
+                print(f"[BLE] Erro ao desligar: {exc}")
+        self.client = None
+
+    def close(self) -> None:
+        if not self.enabled or self.client is None:
+            return
+        try:
+            asyncio.run(self._disconnect_async())
+        except RuntimeError:
+            self.client = None
 
 
 class PiBackend:
@@ -401,6 +436,7 @@ class PiBackend:
         self.button.close()
         self.led.close()
         self.audio.close()
+        self.ble.close()
 
 
 def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
