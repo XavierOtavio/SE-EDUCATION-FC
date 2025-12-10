@@ -456,13 +456,13 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
     return "Entusiasmo normal", False
 
 
-def classify_sound(peak_freq: float) -> str:
+def classify_sound(noise_level: int, peak_freq: float) -> str:
     """
-    Heuristica simples: frequencias altas -> Grito; baixas -> Vaia; neutro caso contrario.
+    Heuristica simples: frequencias altas + nivel alto -> Grito; baixas -> Vaia; neutro caso contrario.
     """
-    if peak_freq > 800:
+    if peak_freq > 700 and noise_level > 300:
         return "Som: Grito agudo", "golo"
-    if peak_freq > 100 and peak_freq < 500:
+    if 80 < peak_freq < 500 and noise_level > 300:
         return "Som: Vaia grave", "vaia"
     return "Som: Neutro", "neutro"
 
@@ -530,7 +530,7 @@ def draw_overlay(
 
 def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     print("A ler sensores no Raspberry Pi. Janela de video se display ativo. Ctrl+C para sair.")
-    last_team_color: Optional[Tuple[int, int, int]] = None
+    last_ble_color: Optional[Tuple[int, int, int]] = None
     override_color: Optional[Tuple[int, int, int]] = None
     override_until: Optional[float] = None
     try:
@@ -540,12 +540,12 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             if override_until and now > override_until:
                 override_color = None
                 override_until = None
-                last_team_color = None  # forca reenviar cor da equipa
+                last_ble_color = None  # forca reenviar cor da equipa
 
             noise, pressure, peak_freq = backend.read()
             message, led_on = decide(noise, pressure)
             backend.set_led(led_on)
-            sound_label, sound_kind = classify_sound(peak_freq)
+            sound_label, sound_kind = classify_sound(noise, peak_freq)
             if sound_kind == "golo":
                 override_color = (0, 255, 0)  # verde em BGR
                 override_until = now + 5.0
@@ -559,11 +559,12 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 frame_rgb = cv2.rotate(frame, cv2.ROTATE_180)
                 faces = backend.detect_emotions(frame_rgb)
                 team_color = dominant_color(frame_rgb, faces)
-                current_color = override_color or team_color
-                if current_color != last_team_color:
-                    backend.ble.send_color(current_color)
-                    last_team_color = current_color
-                draw_overlay(frame_rgb, faces, noise, pressure, message, current_color, sound_label)
+                ble_color = override_color or team_color
+                if ble_color != last_ble_color:
+                    backend.ble.send_color(ble_color)
+                    last_ble_color = ble_color
+                # Overlay mostra sempre a cor real da equipa (nao o override de som)
+                draw_overlay(frame_rgb, faces, noise, pressure, message, team_color, sound_label)
                 cv2.imshow(WINDOW_NAME, frame_rgb)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
