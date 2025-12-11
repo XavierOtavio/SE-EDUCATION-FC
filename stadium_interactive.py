@@ -762,7 +762,7 @@ def classify_sound(noise_level: int, peak_freq: float) -> str:
     #     return "Som: Vaia/ruido medio", "vaia"
     if peak_freq > 500 and noise_level > 700:
         return "Som: Grito agudo", "golo"
-    if 100 < peak_freq < 200 and noise_level > 350:
+    if 100 < peak_freq < 250 and noise_level > 200:
         return "Som: Vaia grave", "vaia"
     return "Som: Neutro", "neutro"
 
