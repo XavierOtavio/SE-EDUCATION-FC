@@ -7,7 +7,7 @@ import asyncio
 import cv2
 import numpy as np
 import pyaudio
-from gpiozero import Button, LED
+from gpiozero import LED
 import threading
 import queue
 from concurrent.futures import ThreadPoolExecutor
@@ -612,7 +612,6 @@ class PiBackend:
         ble_device: str,
         ble_uuid: str,
         ble_enabled: bool,
-        button_pin: int,
         led_pin: int,
         use_camera: bool,
         display: bool,
@@ -635,7 +634,6 @@ class PiBackend:
             )
         else:
             self.audio = DummyAudioLevelReader()
-        self.button = Button(button_pin, pull_up=False)
         self.led = LED(led_pin)
 
         self.detector: Optional[EmotionDetector] = None
@@ -690,11 +688,10 @@ class PiBackend:
         except Exception as e:
             print(f"[Camera] Erro na captura: {e}")
 
-    def read(self) -> Tuple[int, bool]:
-        """Ler ruido (0-1023) do microfone USB e estado do botao (True/False)."""
+    def read(self) -> Tuple[int, float]:
+        """Ler ruido (0-1023) do microfone USB e pico de frequencia."""
         noise_scaled, peak_freq = self.audio.read_level()
-        pressure_val = self.button.is_pressed
-        return noise_scaled, bool(pressure_val), peak_freq
+        return noise_scaled, peak_freq
 
     def set_led(self, on: bool) -> None:
         self.led.on() if on else self.led.off()
@@ -717,7 +714,6 @@ class PiBackend:
             self.capture_thread.join(timeout=1)
         if self.camera:
             self.camera.stop()
-        self.button.close()
         self.led.close()
         self.audio.close()
         self.ble.close()
@@ -744,13 +740,11 @@ class PiBackend:
         print("[LEDs] Desativados")
 
 
-def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
-    """Retorna (mensagem, led_on) segundo os criterios."""
-    if noise > THRESHOLD and pressure:
-        return "GOLO", True
-    if noise > THRESHOLD and not pressure:
-        return "VAIA", False
-    return "Entusiasmo normal", False
+def decide(noise: int) -> Tuple[str, bool]:
+    """Retorna (mensagem, led_on) segundo os criterios apenas de ruido."""
+    if noise > THRESHOLD:
+        return "Ruido alto", True
+    return "Ruido normal", False
 
 
 def classify_sound(noise_level: int, peak_freq: float, amp_duration: float) -> str:
@@ -781,12 +775,11 @@ def draw_overlay(
     frame,
     faces: List[FaceEmotion],
     noise: int,
-    pressure: bool,
     message: str,
     team_color: Tuple[int, int, int],
     sound_label: str,
 ) -> None:
-    """Desenha bounding boxes, emocao e info de ruido/pressao/estado no frame."""
+    """Desenha bounding boxes, emocao e info de ruido/estado no frame."""
     for f in faces:
         cv2.rectangle(frame, (f.x, f.y), (f.x + f.w, f.y + f.h), (0, 255, 0), 2)
         cv2.putText(
@@ -799,7 +792,7 @@ def draw_overlay(
             2,
             cv2.LINE_AA,
         )
-    overlay_text = f"Ruido: {noise}  Pressao: {pressure}  Estado: {message}"
+    overlay_text = f"Ruido: {noise}  Estado: {message}"
     cv2.putText(
         frame,
         overlay_text,
@@ -864,7 +857,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             dt = now - last_ts
             last_ts = now
 
-            noise, pressure, peak_freq = backend.read()
+            noise, peak_freq = backend.read()
             # Atualizar duração de som ativo: sequência de amostras "altas" conta como um bloco.
             # Use limiares alinhados com os valores medidos no estádio.
             high_thresh = 200  # ruido acima disto sugere evento relevante
@@ -885,7 +878,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             if amp_active:
                 amp_duration = min(8.0, amp_duration + dt)
 
-            message, led_on = decide(noise, pressure)
+            message, led_on = decide(noise)
             backend.set_led(led_on)
             sound_label, sound_kind = classify_sound(noise, peak_freq, amp_duration)
             
@@ -907,7 +900,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 backend.update_team_color(team_color)
                 
                 # Desenhar overlay
-                draw_overlay(frame_rgb, faces, noise, pressure, message, team_color, sound_label)
+                draw_overlay(frame_rgb, faces, noise, message, team_color, sound_label)
                 display_buffer.add_frame(frame_rgb, {'faces': faces, 'sound': sound_label})
                 
                 # Exibir apenas a cada intervalo
@@ -925,9 +918,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                         leds_active = False
             else:
                 led_label = "ON " if led_on else "OFF"
-                print(
-                    f"Ruido={noise:4d} | Pressao={pressure!s:5} | LED={led_label} | {message} | {sound_label}"
-                )
+                print(f"Ruido={noise:4d} | LED={led_label} | {message} | {sound_label}")
             
             time.sleep(interval)
     except KeyboardInterrupt:
@@ -1016,12 +1007,6 @@ def parse_args() -> argparse.Namespace:
         help="Desativa leitura do microfone (ruido fica 0).",
     )
     parser.add_argument(
-        "--button-pin",
-        type=int,
-        default=17,
-        help="GPIO do botao (BCM). Use pull-down externo ou ajuste wiring.",
-    )
-    parser.add_argument(
         "--led-pin",
         type=int,
         default=27,
@@ -1041,7 +1026,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--display",
         action="store_true",
-        help="Mostra janela com frame, emocao, ruido, pressao e estado.",
+        help="Mostra janela com frame, emocao, ruido e estado.",
     )
     parser.add_argument(
         "--resolution",
@@ -1111,7 +1096,6 @@ def main() -> None:
         mic_peak_decay=args.mic_peak_decay,
         mic_max_gain=args.mic_max_gain,
         mic_enabled=args.mic_enabled,
-        button_pin=args.button_pin,
         led_pin=args.led_pin,
         use_camera=args.camera or args.display,
         display=args.display,
