@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -787,35 +787,33 @@ def draw_overlay(
 
 def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     print("A ler sensores no Raspberry Pi. Janela de video se display ativo. Ctrl+C para sair.")
-    print("Pressione 'L' para ativar LEDs ou 'K' para desativar. Pressione 'Q' para sair.")
+    print("Pressione 'Q' para sair.")
     
-    last_ble_color: Optional[Tuple[int, int, int]] = None
-    override_color: Optional[Tuple[int, int, int]] = None
-    override_until: Optional[float] = None
+    current_ble_color: Optional[Tuple[int, int, int]] = None
+    led_override_kind: Optional[str] = None  # 'blink', 'steady' ou None
+    led_override_until: Optional[float] = None
+    blink_state = False
+    last_blink_toggle = time.time()
     amp_duration = 0.0
     last_ts = time.time()
     amp_active = False
     high_count = 0
     low_count = 0
     display_buffer = ImageDisplayBuffer(buffer_size=3, display_interval=0.5)
-    leds_active = False
     
     try:
         while True:
             now = time.time()
-            # Limpar override se expirou
-            if override_until and now > override_until:
-                override_color = None
-                override_until = None
+            if led_override_until and now > led_override_until:
+                led_override_kind = None
+                led_override_until = None
 
             dt = now - last_ts
             last_ts = now
 
             noise, peak_freq = backend.read()
-            # Atualizar duração de som ativo: sequência de amostras "altas" conta como um bloco.
-            # Use limiares alinhados com os valores medidos no estádio.
-            high_thresh = 200  # ruido acima disto sugere evento relevante
-            low_thresh = 120   # abaixo disto consideramos que terminou
+            high_thresh = 200
+            low_thresh = 120
             is_high = noise > high_thresh or peak_freq > 500
             if is_high:
                 high_count += 1
@@ -823,7 +821,6 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             else:
                 low_count += 1
                 high_count = 0
-            # Histerese simples: precisa de 2 leituras altas para ligar, 2 baixas para desligar.
             if high_count >= 2:
                 amp_active = True
             if low_count >= 2:
@@ -836,15 +833,13 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             backend.set_led(led_on)
             sound_label, sound_kind = classify_sound(noise, peak_freq, amp_duration)
             
-            # Detetar som e preparar override (mas não ativar LEDs automaticamente)
             if sound_kind == "golo":
-                override_color = (0, 255, 0)  # verde em BGR
-                override_until = now + 5.0
+                led_override_kind = "blink"
+                led_override_until = now + 5.0
             elif sound_kind == "vaia":
-                override_color = (0, 0, 255)  # vermelho em BGR
-                override_until = now + 5.0
+                led_override_kind = "steady"
+                led_override_until = now + 5.0
 
-            # Obter frame do buffer (não bloqueia)
             frame_data = backend.get_latest_frame() if display else None
             
             if frame_data is not None:
@@ -852,33 +847,38 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 faces = backend.detect_emotions(frame_rgb)
                 team_color = dominant_color(frame_rgb, faces)
                 backend.update_team_color(team_color)
-                
-                # Desenhar overlay
+                team_primary = backend.ble._to_primary(team_color) if backend.ble else team_color
                 draw_overlay(frame_rgb, faces, noise, message, team_color, sound_label)
                 display_buffer.add_frame(frame_rgb, {'faces': faces, 'sound': sound_label})
-                
-                # Exibir apenas a cada intervalo
                 if display_buffer.display_if_needed(WINDOW_NAME):
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord("q") or key == ord("Q"):
                         break
-                    elif key == ord("l") or key == ord("L"):
-                        # Ativar LEDs
-                        backend.activate_leds()
-                        leds_active = True
-                    elif key == ord("k") or key == ord("K"):
-                        # Desativar LEDs
-                        backend.deactivate_leds()
-                        leds_active = False
             else:
-                led_label = "ON " if led_on else "OFF"
-                print(f"Ruido={noise:4d} | LED={led_label} | {message} | {sound_label}")
+                print(f"Ruido={noise:4d} | LED={'ON ' if led_on else 'OFF'} | {message} | {sound_label}")
+                team_primary = backend.ble._to_primary(backend.get_team_color()) if backend.ble else backend.get_team_color()
+
+            if led_override_kind == "blink" and led_override_until and now < led_override_until:
+                if now - last_blink_toggle > 0.3:
+                    blink_state = not blink_state
+                    last_blink_toggle = now
+                desired_color = team_primary if blink_state else (255, 255, 255)
+            elif led_override_kind == "steady" and led_override_until and now < led_override_until:
+                desired_color = team_primary
+            else:
+                desired_color = (255, 255, 255)
+                led_override_kind = None
+                led_override_until = None
+
+            if desired_color != current_ble_color:
+                backend.ble.send_color(desired_color)
+                current_ble_color = desired_color
             
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\nTerminando...")
     finally:
-        backend.deactivate_leds()  # Desligar LEDs ao sair
+        backend.deactivate_leds()
         backend.close()
         if display:
             cv2.destroyAllWindows()
@@ -1065,3 +1065,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
