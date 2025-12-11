@@ -803,6 +803,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     led_override_until: Optional[float] = None
     blink_state = False
     last_blink_toggle = time.time()
+    blink_start: Optional[float] = None
     amp_duration = 0.0
     last_ts = time.time()
     amp_active = False
@@ -819,6 +820,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 led_override_kind = None
                 led_override_until = None
                 blink_state = False
+                blink_start = None
 
             dt = now - last_ts
             last_ts = now
@@ -849,6 +851,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 led_override_kind = "blink"
                 led_override_until = now + 5.0
                 blink_state = True
+                blink_start = now
                 last_blink_toggle = now
             elif sound_kind == "vaia":
                 led_override_kind = "steady"
@@ -871,13 +874,15 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                         break
             else:
                 print(f"Ruido={noise:4d} | LED={'ON ' if led_on else 'OFF'} | {message} | {sound_label}")
-                team_primary = backend.ble._to_primary(backend.get_team_color()) if backend.ble else backend.get_team_color()
+                # Sem frame e sem deteção, usar branco como base
+                team_primary = (255, 255, 255)
 
             if led_override_kind == "blink" and led_override_until and now < led_override_until:
-                if now - last_blink_toggle > 0.3:
-                    blink_state = not blink_state
-                    last_blink_toggle = now
-                # Piscar entre cor da equipa e desligado
+                # Index de piscar baseado no tempo decorrido desde o início do blink
+                blink_period = 0.5
+                start_ref = blink_start if blink_start is not None else last_blink_toggle
+                idx = int((now - start_ref) / blink_period)
+                blink_state = (idx % 2) == 0
                 desired_color = team_primary if blink_state else (0, 0, 0)
             elif led_override_kind == "steady" and led_override_until and now < led_override_until:
                 desired_color = team_primary
