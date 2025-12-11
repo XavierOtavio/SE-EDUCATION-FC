@@ -8,6 +8,11 @@ import cv2
 import numpy as np
 import pyaudio
 from gpiozero import Button, LED
+import threading
+import queue
+from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from datetime import datetime
 
 try:
     from picamera2 import Picamera2
@@ -120,8 +125,8 @@ class EmotionDetector:
 
 def dominant_color(frame_bgr, faces: List[FaceEmotion], k: int = 3) -> Tuple[int, int, int]:
     """
-    Estima a cor predominante das camisolas: usa regi��o de tronco abaixo da face
-    mais larga. Se n�o houver faces, usa o frame inteiro.
+    Estima a cor predominante das camisolas: usa regi  o de tronco abaixo da face
+    mais larga. Se n o houver faces, usa o frame inteiro.
     """
     try:
         if frame_bgr is None or frame_bgr.size == 0:
@@ -280,7 +285,7 @@ class DummyAudioLevelReader:
 
 
 class BLEController:
-    """Envia cor via BLE e regista logs de estado de ligacao."""
+    """Envia cor via BLE com conexão persistente. Apenas envia quando necessário."""
 
     def __init__(self, device_mac: str, write_uuid: str, enabled: bool) -> None:
         self.device_mac = device_mac
@@ -288,28 +293,54 @@ class BLEController:
         self.enabled = enabled and BleakClient is not None
         self.last_color: Optional[Tuple[int, int, int]] = None
         self.client: Optional["BleakClient"] = None
+        self.connection_lock = threading.Lock()
+        self.connect_thread: Optional[threading.Thread] = None
+        self.running = True
+        
         if enabled and BleakClient is None:
             print("[BLE] bleak nao instalado; desative BLE ou instale bleak.")
+        elif self.enabled:
+            # Iniciar thread de conexão persistente
+            self.connect_thread = threading.Thread(target=self._maintain_connection, daemon=True)
+            self.connect_thread.start()
 
     async def _ensure_client(self) -> bool:
-        if self.client and self.client.is_connected:
-            return True
-        try:
-            print(f"[BLE] A ligar a {self.device_mac}...")
-            self.client = BleakClient(self.device_mac)
-            await self.client.connect()
-            if not self.client.is_connected:
-                print("[BLE] Falha ao ligar. Verifique o controlador.")
+        """Garante que o cliente BLE está conectado"""
+        with self.connection_lock:
+            if self.client and self.client.is_connected:
+                return True
+            try:
+                print(f"[BLE] A ligar a {self.device_mac}...")
+                self.client = BleakClient(self.device_mac)
+                await self.client.connect()
+                if not self.client.is_connected:
+                    print("[BLE] Falha ao ligar. Verifique o controlador.")
+                    self.client = None
+                    return False
+                print("[BLE] Ligado com sucesso.")
+                return True
+            except Exception as exc:
+                print(f"[BLE] Erro ao ligar: {exc}")
                 self.client = None
                 return False
-            print("[BLE] Ligado.")
-            return True
-        except Exception as exc:
-            print(f"[BLE] Erro ao ligar: {exc}")
-            self.client = None
-            return False
+
+    def _maintain_connection(self) -> None:
+        """Thread para manter conexão BLE ativa continuamente"""
+        while self.running:
+            try:
+                asyncio.run(self._maintain_connection_async())
+            except Exception as e:
+                print(f"[BLE] Erro na thread de manutenção: {e}")
+            time.sleep(5)  # Tentar reconectar a cada 5 segundos se desligado
+
+    async def _maintain_connection_async(self) -> None:
+        """Manter conexão ativa"""
+        if not self.enabled:
+            return
+        await self._ensure_client()
 
     async def _send_async(self, r: int, g: int, b: int) -> None:
+        """Enviar cor via BLE (conexão já deve estar ativa)"""
         if not self.enabled:
             return
         if not await self._ensure_client():
@@ -320,38 +351,239 @@ class BLEController:
             print(f"[BLE] Cor enviada (R={r} G={g} B={b}).")
         except Exception as exc:
             print(f"[BLE] Erro ao enviar cor: {exc}")
-            # força reconectar na proxima tentativa
-            self.client = None
+            with self.connection_lock:
+                self.client = None
 
     def send_color(self, bgr: Tuple[int, int, int]) -> None:
+        """Enviar cor apenas se for diferente da anterior"""
         if not self.enabled:
             return
         if bgr == self.last_color:
-            return
+            return  # Não enviar se for a mesma cor
         self.last_color = bgr
         b, g, r = bgr
         try:
             asyncio.run(self._send_async(r, g, b))
         except RuntimeError as exc:
             print(f"[BLE] Erro ao correr loop asyncio: {exc}")
-            self.client = None
+            with self.connection_lock:
+                self.client = None
+
+    def turn_off_leds(self) -> None:
+        """Desligar LEDs (enviar preto)"""
+        self.send_color((0, 0, 0))
 
     async def _disconnect_async(self) -> None:
-        if self.client and self.client.is_connected:
-            try:
-                await self.client.disconnect()
-                print("[BLE] Desligado.")
-            except Exception as exc:
-                print(f"[BLE] Erro ao desligar: {exc}")
-        self.client = None
+        """Desligar BLE"""
+        with self.connection_lock:
+            if self.client and self.client.is_connected:
+                try:
+                    await self.client.disconnect()
+                    print("[BLE] Desligado.")
+                except Exception as exc:
+                    print(f"[BLE] Erro ao desligar: {exc}")
+            self.client = None
 
     def close(self) -> None:
-        if not self.enabled or self.client is None:
+        """Fechar conexão BLE e thread de manutenção"""
+        if not self.enabled:
             return
+        self.running = False
+        if self.connect_thread:
+            self.connect_thread.join(timeout=2)
         try:
             asyncio.run(self._disconnect_async())
         except RuntimeError:
-            self.client = None
+            pass
+
+
+class OptimizedCameraProcessor:
+    def __init__(self, resolution=(320, 240), buffer_size=3):
+        self.resolution = resolution
+        self.frame_buffer = deque(maxlen=buffer_size)
+        self.emotion_buffer = deque(maxlen=10)
+        self.lock = threading.Lock()
+        
+        # Carregar cascata Haar otimizada
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_alt2.xml'
+        )
+        
+        # Tentar ativar aceleração de hardware
+        self._init_hardware_acceleration()
+        
+    def _init_hardware_acceleration(self):
+        """Ativa aceleração de hardware se disponível"""
+        try:
+            # Para Raspberry Pi com MMAL
+            cv2.setUseOptimized(True)
+            cv2.useIPP(True)
+        except:
+            pass
+    
+    def capture_frames(self, camera_source=0, fps_target=15):
+        """Thread para captura contínua de frames"""
+        cap = cv2.VideoCapture(camera_source)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+        cap.set(cv2.CAP_PROP_FPS, fps_target)
+        
+        # Usar aceleração de hardware se disponível
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        frame_time = 1.0 / fps_target
+        
+        while True:
+            start = time.time()
+            ret, frame = cap.read()
+            
+            if ret:
+                with self.lock:
+                    self.frame_buffer.append({
+                        'frame': frame.copy(),
+                        'timestamp': datetime.now()
+                    })
+            
+            elapsed = time.time() - start
+            sleep_time = max(0, frame_time - elapsed)
+            time.sleep(sleep_time)
+    
+    def detect_faces_optimized(self, frame):
+        """Detecção de faces com parâmetros otimizados"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Parâmetros mais rigorosos para limitar detecções
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.3,        # Mais alto = menos detecções
+            minNeighbors=5,         # Mais alto = mais rigoroso
+            flags=cv2.CASCADE_SCALE_IMAGE,
+            minSize=(20, 20),       # Tamanho mínimo de face
+            maxSize=(self.resolution[0]//2, self.resolution[1]//2)
+        )
+        
+        return faces
+    
+    def process_emotions_batch(self, frames_batch):
+        """Processar múltiplos frames em batch para emoções"""
+        emotions = []
+        
+        for frame_data in frames_batch:
+            frame = frame_data['frame']
+            faces = self.detect_faces_optimized(frame)
+            
+            if len(faces) > 0:
+                # Processar apenas a maior face para eficiência
+                (x, y, w, h) = max(faces, key=lambda f: f[2]*f[3])
+                face_roi = frame[y:y+h, x:x+w]
+                
+                # Aqui você processaria com modelo de emoções
+                emotion_data = {
+                    'face_rect': (x, y, w, h),
+                    'timestamp': frame_data['timestamp']
+                }
+                emotions.append(emotion_data)
+        
+        return emotions
+
+
+class AudioProcessor(threading.Thread):
+    def __init__(self, device_id=2, sample_rate=44100):
+        super().__init__(daemon=True)
+        self.device_id = device_id
+        self.sample_rate = sample_rate
+        self.audio_queue = queue.Queue(maxsize=10)
+        self.running = True
+        
+    def run(self):
+        """Processar áudio continuamente em thread separada"""
+        try:
+            import sounddevice as sd
+            
+            def audio_callback(indata, frames, time_info, status):
+                if status:
+                    print(f"Audio status: {status}")
+                
+                try:
+                    self.audio_queue.put_nowait(indata.copy())
+                except queue.Full:
+                    pass  # Descartar frame se fila está cheia
+            
+            with sd.InputStream(
+                device=self.device_id,
+                samplerate=self.sample_rate,
+                channels=1,
+                callback=audio_callback,
+                blocksize=2048
+            ):
+                while self.running:
+                    time.sleep(0.1)
+        except ImportError:
+            print("sounddevice não instalado")
+
+
+class LEDController(threading.Thread):
+    def __init__(self, ble_device=None, ble_uuid=None, update_interval=0.1):
+        super().__init__(daemon=True)
+        self.ble_device = ble_device
+        self.ble_uuid = ble_uuid
+        self.update_interval = update_interval
+        self.command_queue = queue.Queue()
+        self.running = True
+        self.last_update = time.time()
+        
+    def run(self):
+        """Processar comandos LED continuamente"""
+        while self.running:
+            try:
+                command = self.command_queue.get(timeout=self.update_interval)
+                self._send_to_ble(command)
+                self.last_update = time.time()
+            except queue.Empty:
+                pass
+    
+    def _send_to_ble(self, command):
+        """Enviar comando via BLE"""
+        # Implementar comunicação BLE aqui
+        pass
+    
+    def queue_command(self, command):
+        """Adicionar comando à fila"""
+        try:
+            self.command_queue.put_nowait(command)
+        except queue.Full:
+            pass
+
+
+class ImageDisplayBuffer:
+    """Buffer para exibição de imagens, não em tempo real"""
+    def __init__(self, buffer_size=5, display_interval=0.5):
+        self.buffer = deque(maxlen=buffer_size)
+        self.display_interval = display_interval
+        self.last_display = time.time()
+        self.lock = threading.Lock()
+    
+    def add_frame(self, frame, metadata=None):
+        with self.lock:
+            self.buffer.append({
+                'frame': frame,
+                'metadata': metadata,
+                'timestamp': time.time()
+            })
+    
+    def display_if_needed(self, window_name='Stadium Interactive'):
+        """Exibir apenas se passou o intervalo"""
+        current_time = time.time()
+        
+        if current_time - self.last_display >= self.display_interval:
+            with self.lock:
+                if self.buffer:
+                    latest = self.buffer[-1]
+                    cv2.imshow(window_name, latest['frame'])
+                    self.last_display = current_time
+                    return True
+        
+        return False
 
 
 class PiBackend:
@@ -405,6 +637,16 @@ class PiBackend:
         self.camera: Optional[Picamera2] = None
         self.display = display
         self.ble = BLEController(ble_device, ble_uuid, ble_enabled)
+        
+        # Buffer para frames e emoções
+        self.frame_buffer = deque(maxlen=3)
+        self.frame_lock = threading.Lock()
+        self.capture_thread: Optional[threading.Thread] = None
+        self.camera_running = False
+        
+        # Armazenar cor da equipa para usar quando LEDs forem ativados
+        self.team_color: Tuple[int, int, int] = (0, 0, 255)  # Vermelho por defeito
+        self.team_color_lock = threading.Lock()
 
         if use_camera or display:
             if Picamera2 is None:
@@ -412,12 +654,36 @@ class PiBackend:
                     "picamera2 nao instalado; instale python3-picamera2 ou desative --camera/--display."
                 )
             self.camera = Picamera2()
-            config = self.camera.create_preview_configuration({'format': 'RGB888'})
+            # Configurar resolução otimizada (320x240) uma única vez
+            config = self.camera.create_preview_configuration({
+                'format': 'RGB888',
+                'size': resolution
+            })
             self.camera.configure(config)
             self.camera.start()
             self.detector = EmotionDetector()
+            
+            # Iniciar thread de captura contínua
+            self.camera_running = True
+            self.capture_thread = threading.Thread(target=self._capture_frames_continuous, daemon=True)
+            self.capture_thread.start()
 
         time.sleep(0.05)
+
+    def _capture_frames_continuous(self) -> None:
+        """Thread para capturar frames continuamente sem bloquear o loop principal"""
+        try:
+            while self.camera_running and self.camera:
+                frame = self.camera.capture_array()
+                if frame is not None:
+                    with self.frame_lock:
+                        self.frame_buffer.append({
+                            'frame': cv2.rotate(frame, cv2.ROTATE_180),  # Corrigir orientação
+                            'timestamp': datetime.now()
+                        })
+                time.sleep(0.033)  # ~30 FPS na captura, processamento em 15 FPS
+        except Exception as e:
+            print(f"[Camera] Erro na captura: {e}")
 
     def read(self) -> Tuple[int, bool]:
         """Ler ruido (0-1023) do microfone USB e estado do botao (True/False)."""
@@ -428,10 +694,12 @@ class PiBackend:
     def set_led(self, on: bool) -> None:
         self.led.on() if on else self.led.off()
 
-    def capture_frame(self):
-        if not self.camera:
-            return None
-        return self.camera.capture_array()
+    def get_latest_frame(self) -> Optional[dict]:
+        """Obter o frame mais recente do buffer sem bloquear"""
+        with self.frame_lock:
+            if self.frame_buffer:
+                return self.frame_buffer[-1]
+        return None
 
     def detect_emotions(self, frame_bgr) -> List[FaceEmotion]:
         if not self.detector or frame_bgr is None:
@@ -439,12 +707,36 @@ class PiBackend:
         return self.detector.detect(frame_bgr)
 
     def close(self) -> None:
+        self.camera_running = False
+        if self.capture_thread:
+            self.capture_thread.join(timeout=1)
         if self.camera:
             self.camera.stop()
         self.button.close()
         self.led.close()
         self.audio.close()
         self.ble.close()
+
+    def get_team_color(self) -> Tuple[int, int, int]:
+        """Obter cor atual da equipa"""
+        with self.team_color_lock:
+            return self.team_color
+
+    def update_team_color(self, color: Tuple[int, int, int]) -> None:
+        """Atualizar cor da equipa detetada"""
+        with self.team_color_lock:
+            self.team_color = color
+
+    def activate_leds(self) -> None:
+        """Ativar LEDs com a cor da equipa"""
+        color = self.get_team_color()
+        self.ble.send_color(color)
+        print(f"[LEDs] Ativados com cor da equipa (RGB={color})")
+
+    def deactivate_leds(self) -> None:
+        """Desativar LEDs"""
+        self.ble.turn_off_leds()
+        print("[LEDs] Desativados")
 
 
 def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
@@ -459,14 +751,14 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
 def classify_sound(noise_level: int, peak_freq: float) -> str:
     print(f"Peak Frequency: {peak_freq}, Noise Level: {noise_level}")  # Verifica os valores
     # Mais permissivo: se o nivel bruto for alto, prioriza ruido.
-    if noise_level > 600:
+    if noise_level > 30:
         return "Som: Grito/alto", "golo"
-    if noise_level > 300:
+    if noise_level > 20:
         return "Som: Vaia/ruido medio", "vaia"
     # Caso contrario, usa frequencia se houver pico definido.
-    if peak_freq > 600 and noise_level > 120:
+    if peak_freq > 600 and noise_level > 30:
         return "Som: Grito agudo", "golo"
-    if 80 < peak_freq < 450 and noise_level > 80:
+    if 80 < peak_freq < 450 and noise_level > 20:
         return "Som: Vaia grave", "vaia"
     return "Som: Neutro", "neutro"
 
@@ -534,9 +826,14 @@ def draw_overlay(
 
 def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     print("A ler sensores no Raspberry Pi. Janela de video se display ativo. Ctrl+C para sair.")
+    print("Pressione 'L' para ativar LEDs ou 'K' para desativar. Pressione 'Q' para sair.")
+    
     last_ble_color: Optional[Tuple[int, int, int]] = None
     override_color: Optional[Tuple[int, int, int]] = None
     override_until: Optional[float] = None
+    display_buffer = ImageDisplayBuffer(buffer_size=3, display_interval=0.5)
+    leds_active = False
+    
     try:
         while True:
             now = time.time()
@@ -544,12 +841,13 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             if override_until and now > override_until:
                 override_color = None
                 override_until = None
-                last_ble_color = None  # forca reenviar cor da equipa
 
             noise, pressure, peak_freq = backend.read()
             message, led_on = decide(noise, pressure)
             backend.set_led(led_on)
             sound_label, sound_kind = classify_sound(noise, peak_freq)
+            
+            # Detetar som e preparar override (mas não ativar LEDs automaticamente)
             if sound_kind == "golo":
                 override_color = (0, 255, 0)  # verde em BGR
                 override_until = now + 5.0
@@ -557,30 +855,43 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 override_color = (0, 0, 255)  # vermelho em BGR
                 override_until = now + 5.0
 
-            frame = backend.capture_frame() if display else None
-            if frame is not None:
-                # Camera montada invertida: rodar 180 graus para corrigir orientacao.
-                frame_rgb = cv2.rotate(frame, cv2.ROTATE_180)
+            # Obter frame do buffer (não bloqueia)
+            frame_data = backend.get_latest_frame() if display else None
+            
+            if frame_data is not None:
+                frame_rgb = frame_data['frame']
                 faces = backend.detect_emotions(frame_rgb)
                 team_color = dominant_color(frame_rgb, faces)
-                ble_color = override_color or team_color
-                if ble_color != last_ble_color:
-                    backend.ble.send_color(ble_color)
-                    last_ble_color = ble_color
-                # Overlay mostra sempre a cor real da equipa (nao o override de som)
+                backend.update_team_color(team_color)
+                
+                # Desenhar overlay
                 draw_overlay(frame_rgb, faces, noise, pressure, message, team_color, sound_label)
-                cv2.imshow(WINDOW_NAME, frame_rgb)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                display_buffer.add_frame(frame_rgb, {'faces': faces, 'sound': sound_label})
+                
+                # Exibir apenas a cada intervalo
+                if display_buffer.display_if_needed(WINDOW_NAME):
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord("q") or key == ord("Q"):
+                        break
+                    elif key == ord("l") or key == ord("L"):
+                        # Ativar LEDs
+                        backend.activate_leds()
+                        leds_active = True
+                    elif key == ord("k") or key == ord("K"):
+                        # Desativar LEDs
+                        backend.deactivate_leds()
+                        leds_active = False
             else:
                 led_label = "ON " if led_on else "OFF"
                 print(
                     f"Ruido={noise:4d} | Pressao={pressure!s:5} | LED={led_label} | {message} | {sound_label}"
                 )
+            
             time.sleep(interval)
     except KeyboardInterrupt:
         print("\nTerminando...")
     finally:
+        backend.deactivate_leds()  # Desligar LEDs ao sair
         backend.close()
         if display:
             cv2.destroyAllWindows()
@@ -774,6 +1085,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
