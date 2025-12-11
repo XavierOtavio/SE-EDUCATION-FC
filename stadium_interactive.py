@@ -753,17 +753,23 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
     return "Entusiasmo normal", False
 
 
-def classify_sound(noise_level: int, peak_freq: float) -> str:
-    print(f"Peak Frequency: {peak_freq}, Noise Level: {noise_level}")  # Verifica os valores
-    # Mais permissivo: nivel alto => golo; medio => vaia; senao frequencia decide.
-    # if noise_level > 700:
-    #     return "Som: Grito/alto", "golo"
-    # if noise_level > 350:
-    #     return "Som: Vaia/ruido medio", "vaia"
-    if peak_freq > 500 and noise_level > 700:
-        return "Som: Grito agudo", "golo"
-    if 100 < peak_freq < 250 and noise_level > 200:
-        return "Som: Vaia grave", "vaia"
+def classify_sound(noise_level: int, peak_freq: float, amp_duration: float) -> str:
+    """
+    Usa amplitude, pico de frequencia e tempo de som mantido para distinguir
+    gritos (golo) de vaias graves e de conversa normal.
+    """
+    print(
+        f"Peak Frequency: {peak_freq:.1f} Hz, Noise Level: {noise_level}, Duracao: {amp_duration:.2f}s"
+    )
+    # Limiares ajustados para leituras tipicas (0-100) consoante o ganho atual.
+    if amp_duration > 1.2 and (noise_level > 45 or peak_freq > 700):
+        return "Som: Grito prolongado", "golo"
+    if amp_duration > 1.0 and (noise_level > 28 or (80 < peak_freq < 450)):
+        return "Som: Vaia prolongada", "vaia"
+    if noise_level > 55 or peak_freq > 850:
+        return "Som: Grito/alto", "golo"
+    if noise_level > 32 or (80 < peak_freq < 450 and noise_level > 15):
+        return "Som: Vaia/ruido medio", "vaia"
     return "Som: Neutro", "neutro"
 
 
@@ -835,6 +841,9 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     last_ble_color: Optional[Tuple[int, int, int]] = None
     override_color: Optional[Tuple[int, int, int]] = None
     override_until: Optional[float] = None
+    amp_duration = 0.0
+    last_ts = time.time()
+    amp_active = False
     display_buffer = ImageDisplayBuffer(buffer_size=3, display_interval=0.5)
     leds_active = False
     
@@ -846,10 +855,25 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 override_color = None
                 override_until = None
 
+            dt = now - last_ts
+            last_ts = now
+
             noise, pressure, peak_freq = backend.read()
+            # Atualizar duração de som ativo (quando amplitude passa de um limiar)
+            amp_on = max(20, int(NOISE_MAX * 0.02))
+            amp_off = max(10, int(NOISE_MAX * 0.01))
+            if noise > amp_on or peak_freq > 600:
+                amp_active = True
+            elif noise < amp_off and peak_freq < 120:
+                amp_active = False
+            if amp_active:
+                amp_duration = min(5.0, amp_duration + dt)
+            else:
+                amp_duration = max(0.0, amp_duration - dt)
+
             message, led_on = decide(noise, pressure)
             backend.set_led(led_on)
-            sound_label, sound_kind = classify_sound(noise, peak_freq)
+            sound_label, sound_kind = classify_sound(noise, peak_freq, amp_duration)
             
             # Detetar som e preparar override (mas não ativar LEDs automaticamente)
             if sound_kind == "golo":
