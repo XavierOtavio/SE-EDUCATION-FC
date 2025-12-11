@@ -844,6 +844,8 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     amp_duration = 0.0
     last_ts = time.time()
     amp_active = False
+    high_count = 0
+    low_count = 0
     display_buffer = ImageDisplayBuffer(buffer_size=3, display_interval=0.5)
     leds_active = False
     
@@ -859,17 +861,24 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             last_ts = now
 
             noise, pressure, peak_freq = backend.read()
-            # Atualizar duração de som ativo (quando amplitude passa de um limiar)
-            amp_on = max(20, int(NOISE_MAX * 0.02))
-            amp_off = max(10, int(NOISE_MAX * 0.01))
-            if noise > amp_on or peak_freq > 600:
-                amp_active = True
-            elif noise < amp_off and peak_freq < 120:
-                amp_active = False
-            if amp_active:
-                amp_duration = min(5.0, amp_duration + dt)
+            # Atualizar duração de som ativo: sequência de amostras "altas" conta como um bloco.
+            high_thresh = 25  # ajuste se o teu ganho mudar
+            low_thresh = 12
+            is_high = noise > high_thresh or peak_freq > 600
+            if is_high:
+                high_count += 1
+                low_count = 0
             else:
-                amp_duration = max(0.0, amp_duration - dt)
+                low_count += 1
+                high_count = 0
+            # Histerese simples: precisa de 2 leituras altas para ligar, 2 baixas para desligar.
+            if high_count >= 2:
+                amp_active = True
+            if low_count >= 2:
+                amp_active = False
+                amp_duration = 0.0
+            if amp_active:
+                amp_duration = min(8.0, amp_duration + dt)
 
             message, led_on = decide(noise, pressure)
             backend.set_led(led_on)
