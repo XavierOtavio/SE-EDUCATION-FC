@@ -800,6 +800,8 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
     high_count = 0
     low_count = 0
     display_buffer = ImageDisplayBuffer(buffer_size=3, display_interval=0.5)
+    # Garantir LED branco por defeito no arranque
+    backend.ble.send_color((255, 255, 255))
     
     try:
         while True:
@@ -807,6 +809,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             if led_override_until and now > led_override_until:
                 led_override_kind = None
                 led_override_until = None
+                blink_state = False
 
             dt = now - last_ts
             last_ts = now
@@ -869,6 +872,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 desired_color = (255, 255, 255)
                 led_override_kind = None
                 led_override_until = None
+                blink_state = False
 
             if desired_color != current_ble_color:
                 backend.ble.send_color(desired_color)
@@ -1065,4 +1069,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
