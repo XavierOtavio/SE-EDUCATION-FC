@@ -839,9 +839,12 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
             if sound_kind == "golo":
                 led_override_kind = "blink"
                 led_override_until = now + 5.0
+                blink_state = True
+                last_blink_toggle = now
             elif sound_kind == "vaia":
                 led_override_kind = "steady"
                 led_override_until = now + 5.0
+                blink_state = False
 
             frame_data = backend.get_latest_frame() if display else None
             
