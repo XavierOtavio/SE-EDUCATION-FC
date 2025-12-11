@@ -344,11 +344,20 @@ class BLEController:
         pass
 
     def _to_primary(self, bgr: Tuple[int, int, int]) -> Tuple[int, int, int]:
-        """Satura a cor para o canal dominante (B, G ou R) para ficar 255/0/0 etc."""
+        """
+        Satura a cor para o canal dominante (B, G ou R) para ficar 255/0/0 etc.
+        Preserva branco (ou quase branco/cinza claro) e preto quando aplicável.
+        """
         b, g, r = bgr
         max_val = max(b, g, r)
-        if max_val == 0:
+        min_val = min(b, g, r)
+        # Preto / muito escuro
+        if max_val < 15:
             return (0, 0, 0)
+        # Branco ou quase branco/cinza claro: mantém branco
+        if max_val > 200 and (max_val - min_val) < 40:
+            return (255, 255, 255)
+        # Canal dominante
         if b == max_val and b > g and b > r:
             return (255, 0, 0)  # azul dominante em BGR
         if g == max_val and g > b and g > r:
@@ -876,6 +885,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 led_override_kind = None
                 led_override_until = None
                 blink_state = False
+                last_blink_toggle = now
 
             if desired_color != current_ble_color:
                 backend.ble.send_color(desired_color)
