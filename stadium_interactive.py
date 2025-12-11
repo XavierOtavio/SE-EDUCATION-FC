@@ -321,10 +321,11 @@ class BLEController:
         """Enviar cor apenas se for diferente da anterior, com retry."""
         if not self.enabled:
             return
-        if bgr == self.last_color:
+        bgr_primary = self._to_primary(bgr)
+        if bgr_primary == self.last_color:
             return  # Nao enviar se for a mesma cor
-        self.last_color = bgr
-        b, g, r = bgr
+        self.last_color = bgr_primary
+        b, g, r = bgr_primary
         for attempt in range(2):  # duas tentativas para cobrir falha inicial
             try:
                 asyncio.run(self._send_once(r, g, b))
@@ -341,6 +342,19 @@ class BLEController:
     def close(self) -> None:
         """Sem estado persistente para fechar quando usamos liga/desliga por envio."""
         pass
+
+    def _to_primary(self, bgr: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        """Satura a cor para o canal dominante (B, G ou R) para ficar 255/0/0 etc."""
+        b, g, r = bgr
+        max_val = max(b, g, r)
+        if max_val == 0:
+            return (0, 0, 0)
+        if b == max_val and b > g and b > r:
+            return (255, 0, 0)  # azul dominante em BGR
+        if g == max_val and g > b and g > r:
+            return (0, 255, 0)  # verde dominante
+        # Se r for o maior (ou empate), assume vermelho dominante
+        return (0, 0, 255)
 
 class OptimizedCameraProcessor:
     def __init__(self, resolution=(320, 240), buffer_size=3):
@@ -1051,4 +1065,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
