@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -290,107 +290,47 @@ class DummyAudioLevelReader:
 
 
 class BLEController:
-    """Envia cor via BLE com conexão persistente. Apenas envia quando necessário."""
+    """Envia cor via BLE. Cada envio cria e fecha a ligacao para evitar conflitos de loop asyncio."""
 
     def __init__(self, device_mac: str, write_uuid: str, enabled: bool) -> None:
         self.device_mac = device_mac
         self.write_uuid = write_uuid
         self.enabled = enabled and BleakClient is not None
         self.last_color: Optional[Tuple[int, int, int]] = None
-        self.client: Optional["BleakClient"] = None
-        self.connection_lock = threading.Lock()
-        self.connect_thread: Optional[threading.Thread] = None
-        self.running = True
-        
         if enabled and BleakClient is None:
             print("[BLE] bleak nao instalado; desative BLE ou instale bleak.")
-        elif self.enabled:
-            # Iniciar thread de conexão persistente
-            self.connect_thread = threading.Thread(target=self._maintain_connection, daemon=True)
-            self.connect_thread.start()
 
-    async def _ensure_client(self) -> bool:
-        """Garante que o cliente BLE está conectado"""
-        with self.connection_lock:
-            if self.client and self.client.is_connected:
-                return True
-            try:
-                print(f"[BLE] A ligar a {self.device_mac}...")
-                self.client = BleakClient(self.device_mac)
-                await self.client.connect()
-                if not self.client.is_connected:
-                    print("[BLE] Falha ao ligar. Verifique o controlador.")
-                    self.client = None
-                    return False
-                print("[BLE] Ligado com sucesso.")
-                return True
-            except Exception as exc:
-                print(f"[BLE] Erro ao ligar: {exc}")
-                self.client = None
-                return False
-
-    def _maintain_connection(self) -> None:
-        """Thread para manter conexão BLE ativa continuamente"""
-        while self.running:
-            try:
-                asyncio.run(self._maintain_connection_async())
-            except Exception as e:
-                print(f"[BLE] Erro na thread de manutenção: {e}")
-            time.sleep(5)  # Tentar reconectar a cada 5 segundos se desligado
-
-    async def _maintain_connection_async(self) -> None:
-        """Manter conexão ativa"""
+    async def _send_once(self, r: int, g: int, b: int) -> None:
+        """Liga, envia e desliga no mesmo loop para evitar conflitos de loops."""
         if not self.enabled:
-            return
-        await self._ensure_client()
-
-    async def _send_async(self, r: int, g: int, b: int) -> None:
-        """Enviar cor via BLE (conexão já deve estar ativa)"""
-        if not self.enabled:
-            return
-        if not await self._ensure_client():
             return
         try:
-            cmd = bytes([0x7E, 0x00, 0x05, 0x03, r, g, b, 0x00, 0xEF])
-            await self.client.write_gatt_char(self.write_uuid, cmd)
-            print(f"[BLE] Cor enviada (R={r} G={g} B={b}).")
+            async with BleakClient(self.device_mac) as client:
+                if not client.is_connected:
+                    await client.connect()
+                if not client.is_connected:
+                    print("[BLE] Falha ao ligar. Verifique o controlador.")
+                    return
+                cmd = bytes([0x7E, 0x00, 0x05, 0x03, r, g, b, 0x00, 0xEF])
+                await client.write_gatt_char(self.write_uuid, cmd)
+                print(f"[BLE] Cor enviada (R={r} G={g} B={b}).")
         except Exception as exc:
             print(f"[BLE] Erro ao enviar cor: {exc}")
-            with self.connection_lock:
-                self.client = None
 
     def send_color(self, bgr: Tuple[int, int, int]) -> None:
-        """Enviar cor apenas se for diferente da anterior"""
+        """Enviar cor apenas se for diferente da anterior, com retry."""
         if not self.enabled:
             return
         if bgr == self.last_color:
-            return  # Não enviar se for a mesma cor
+            return  # Nao enviar se for a mesma cor
         self.last_color = bgr
         b, g, r = bgr
-        try:
-            asyncio.run(self._send_async(r, g, b))
-        except RuntimeError as exc:
-            print(f"[BLE] Erro ao correr loop asyncio: {exc}")
-            with self.connection_lock:
-                self.client = None
-
-    # Override com retry para evitar falha na primeira ligação/envio
-    def send_color(self, bgr: Tuple[int, int, int]) -> None:
-        """Enviar cor apenas se for diferente da anterior, com 2 tentativas."""
-        if not self.enabled:
-            return
-        if bgr == self.last_color:
-            return
-        self.last_color = bgr
-        b, g, r = bgr
-        for attempt in range(2):
+        for attempt in range(2):  # duas tentativas para cobrir falha inicial
             try:
-                asyncio.run(self._send_async(r, g, b))
+                asyncio.run(self._send_once(r, g, b))
                 return
             except RuntimeError as exc:
                 print(f"[BLE] Erro ao correr loop asyncio (tentativa {attempt+1}): {exc}")
-                with self.connection_lock:
-                    self.client = None
                 time.sleep(0.2)
         print("[BLE] Nao foi possivel enviar cor apos retries.")
 
@@ -398,29 +338,9 @@ class BLEController:
         """Desligar LEDs (enviar preto)"""
         self.send_color((0, 0, 0))
 
-    async def _disconnect_async(self) -> None:
-        """Desligar BLE"""
-        with self.connection_lock:
-            if self.client and self.client.is_connected:
-                try:
-                    await self.client.disconnect()
-                    print("[BLE] Desligado.")
-                except Exception as exc:
-                    print(f"[BLE] Erro ao desligar: {exc}")
-            self.client = None
-
     def close(self) -> None:
-        """Fechar conexão BLE e thread de manutenção"""
-        if not self.enabled:
-            return
-        self.running = False
-        if self.connect_thread:
-            self.connect_thread.join(timeout=2)
-        try:
-            asyncio.run(self._disconnect_async())
-        except RuntimeError:
-            pass
-
+        """Sem estado persistente para fechar quando usamos liga/desliga por envio."""
+        pass
 
 class OptimizedCameraProcessor:
     def __init__(self, resolution=(320, 240), buffer_size=3):
@@ -1131,5 +1051,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
