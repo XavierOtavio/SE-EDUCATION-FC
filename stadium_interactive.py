@@ -877,7 +877,8 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
                 if now - last_blink_toggle > 0.3:
                     blink_state = not blink_state
                     last_blink_toggle = now
-                desired_color = team_primary if blink_state else (255, 255, 255)
+                # Piscar entre cor da equipa e desligado
+                desired_color = team_primary if blink_state else (0, 0, 0)
             elif led_override_kind == "steady" and led_override_until and now < led_override_until:
                 desired_color = team_primary
             else:
