@@ -233,12 +233,17 @@ class AudioLevelReader:
         samples = np.frombuffer(data, dtype=np.int16)
         if samples.size == 0:
             return 0, 0.0
-        rms = float(np.sqrt(np.mean(np.square(samples))))
+        samples_f = samples.astype(np.float32)
+        rms = float(np.sqrt(np.mean(np.square(samples_f))))
+        peak = float(np.max(np.abs(samples_f)))
         rms_norm = rms / self.max_int
+        peak_norm = peak / self.max_int
         if rms_norm > self.noise_floor:
             rms_norm = (rms_norm - self.noise_floor) / max(1e-6, (1 - self.noise_floor))
         else:
             rms_norm = 0.0
+        # Usa o maior dos dois para evitar que sons fortes pareçam fracos.
+        level_norm = max(rms_norm, peak_norm)
         if self.auto_gain:
             self.rolling_peak = max(rms_norm, self.rolling_peak * self.peak_decay)
             dyn_gain = self.gain
@@ -247,7 +252,7 @@ class AudioLevelReader:
             dyn_gain = min(dyn_gain, self.max_gain)
         else:
             dyn_gain = self.gain
-        level_raw = int(min(NOISE_MAX, rms_norm * dyn_gain * NOISE_MAX))
+        level_raw = int(min(NOISE_MAX, level_norm * dyn_gain * NOISE_MAX))
         if self.smoothing <= 0:
             level_smooth = level_raw
         else:
@@ -750,15 +755,14 @@ def decide(noise: int, pressure: bool) -> Tuple[str, bool]:
 
 def classify_sound(noise_level: int, peak_freq: float) -> str:
     print(f"Peak Frequency: {peak_freq}, Noise Level: {noise_level}")  # Verifica os valores
-    # Mais permissivo: se o nivel bruto for alto, prioriza ruido.
-    if noise_level > 30:
+    # Mais permissivo: nivel alto => golo; medio => vaia; senao frequencia decide.
+    if noise_level > 700:
         return "Som: Grito/alto", "golo"
-    if noise_level > 20:
+    if noise_level > 350:
         return "Som: Vaia/ruido medio", "vaia"
-    # Caso contrario, usa frequencia se houver pico definido.
-    if peak_freq > 600 and noise_level > 30:
+    if peak_freq > 800 and noise_level > 80:
         return "Som: Grito agudo", "golo"
-    if 80 < peak_freq < 450 and noise_level > 20:
+    if 60 < peak_freq < 400 and noise_level > 50:
         return "Som: Vaia grave", "vaia"
     return "Som: Neutro", "neutro"
 
@@ -1085,5 +1089,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
