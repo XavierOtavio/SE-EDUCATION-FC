@@ -374,6 +374,26 @@ class BLEController:
             with self.connection_lock:
                 self.client = None
 
+    # Override com retry para evitar falha na primeira ligação/envio
+    def send_color(self, bgr: Tuple[int, int, int]) -> None:
+        """Enviar cor apenas se for diferente da anterior, com 2 tentativas."""
+        if not self.enabled:
+            return
+        if bgr == self.last_color:
+            return
+        self.last_color = bgr
+        b, g, r = bgr
+        for attempt in range(2):
+            try:
+                asyncio.run(self._send_async(r, g, b))
+                return
+            except RuntimeError as exc:
+                print(f"[BLE] Erro ao correr loop asyncio (tentativa {attempt+1}): {exc}")
+                with self.connection_lock:
+                    self.client = None
+                time.sleep(0.2)
+        print("[BLE] Nao foi possivel enviar cor apos retries.")
+
     def turn_off_leds(self) -> None:
         """Desligar LEDs (enviar preto)"""
         self.send_color((0, 0, 0))
