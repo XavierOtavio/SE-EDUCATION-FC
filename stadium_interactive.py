@@ -602,7 +602,7 @@ class PiBackend:
         self.camera_running = False
         
         # Armazenar cor da equipa para usar quando LEDs forem ativados
-        self.team_color: Tuple[int, int, int] = (0, 0, 255)  # Vermelho por defeito
+        self.team_color: Tuple[int, int, int] = (0, 0, 0)  # Vermelho por defeito
         self.team_color_lock = threading.Lock()
 
         if use_camera or display:
