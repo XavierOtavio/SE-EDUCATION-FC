@@ -761,15 +761,19 @@ def classify_sound(noise_level: int, peak_freq: float, amp_duration: float) -> s
     print(
         f"Peak Frequency: {peak_freq:.1f} Hz, Noise Level: {noise_level}, Duracao: {amp_duration:.2f}s"
     )
-    # Limiares ajustados para leituras tipicas (0-100) consoante o ganho atual.
-    if amp_duration > 1.2 and (noise_level > 45 or peak_freq > 700):
+    # Limiares calibrados com os valores que indicou:
+    # - Golo: freq > 500 Hz e ruido > 600 (ou pico alto prolongado)
+    # - Vaia: freq 150-250 Hz e ruido ~300
+    # - Conversa: freq 50-500 Hz e ruido 100-300 (neutro)
+    if (peak_freq > 500 and noise_level > 550) or (
+        amp_duration > 0.8 and peak_freq > 450 and noise_level > 500
+    ):
         return "Som: Grito prolongado", "golo"
-    if amp_duration > 1.0 and (noise_level > 28 or (80 < peak_freq < 450)):
+    if (150 <= peak_freq <= 320 and noise_level >= 240 and amp_duration > 0.6) or (
+        noise_level > 320 and 120 < peak_freq < 400
+    ):
         return "Som: Vaia prolongada", "vaia"
-    if noise_level > 55 or peak_freq > 850:
-        return "Som: Grito/alto", "golo"
-    if noise_level > 32 or (80 < peak_freq < 450 and noise_level > 15):
-        return "Som: Vaia/ruido medio", "vaia"
+    # Se nÇœo atingir os limiares acima, considerar neutro/conversa.
     return "Som: Neutro", "neutro"
 
 
@@ -862,9 +866,10 @@ def run_loop(backend: PiBackend, interval: float, display: bool) -> None:
 
             noise, pressure, peak_freq = backend.read()
             # Atualizar duração de som ativo: sequência de amostras "altas" conta como um bloco.
-            high_thresh = 25  # ajuste se o teu ganho mudar
-            low_thresh = 12
-            is_high = noise > high_thresh or peak_freq > 600
+            # Use limiares alinhados com os valores medidos no estádio.
+            high_thresh = 200  # ruido acima disto sugere evento relevante
+            low_thresh = 120   # abaixo disto consideramos que terminou
+            is_high = noise > high_thresh or peak_freq > 500
             if is_high:
                 high_count += 1
                 low_count = 0
