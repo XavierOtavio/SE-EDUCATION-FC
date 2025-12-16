@@ -894,11 +894,12 @@ class DisplayManager:
             except Exception:
                 self.symbols[k] = None
         self._last_demo_label: Optional[str] = None
+        self._active_label: Optional[str] = None
 
     def _color_to_key(self, color: Tuple[int, int, int]) -> str:
         return f"{color[0]}-{color[1]}-{color[2]}"
 
-    def update_stats(self, faces: List[FaceEmotion], sound_kind: str, team_color: Tuple[int, int, int]) -> None:
+    def update_stats(self, faces: List[FaceEmotion], sound_kind: Optional[str], team_color: Tuple[int, int, int]) -> None:
         # Map team color to primary label
         label, _ = bgr_to_primary_label_and_bgr(team_color)
 
@@ -912,6 +913,8 @@ class DisplayManager:
                 self.team_stats[label]["Feliz"] += 1
             elif f.emotion == "Triste":
                 self.team_stats[label]["Triste"] += 1
+    def set_active_team(self, team_label: Optional[str]) -> None:
+        self._active_label = team_label
 
     def render(self, frame, faces: List[FaceEmotion], noise: int, message: str, team_color: Tuple[int, int, int], sound_label: str, sound_kind: str) -> None:
         h, w, _ = frame.shape
@@ -1017,7 +1020,16 @@ class DisplayManager:
             s = self.team_stats.get(l, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
             max_stat = max(max_stat, s.get("golo",0), s.get("vaia",0), s.get("Feliz",0), s.get("Triste",0))
 
+        # decide which labels to draw: all in debug, otherwise only active
+        if self.mode == "debug":
+            labels_to_draw = [l for l, _ in order]
+        else:
+            labels_to_draw = [self._active_label] if self._active_label in ("red","green","blue") else []
+
         for label, color in order:
+            if label not in labels_to_draw:
+                i += 1
+                continue
             sx = x + i * section_w
             ex = sx + section_w - 6
             # background subtle
@@ -1138,6 +1150,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool, mode: str = "no
     try:
         ctx = key_reader if key_reader is not None else contextlib.nullcontext()
         with ctx:
+            prev_sound_kind = "neutro"
             while True:
                 now = time.time()
                 dt = now - last_ts
@@ -1176,8 +1189,12 @@ def run_loop(backend: PiBackend, interval: float, display: bool, mode: str = "no
                     faces = backend.detect_emotions(frame_rgb)
                     team_color = dominant_color(frame_rgb, faces)
                     backend.update_team_color(team_color)
-                    # Update stats for display manager
-                    display_manager.update_stats(faces, sound_kind, team_color)
+                    # Debounce sound counting: only increment once when sound transitions to golo/vaia
+                    sound_to_count = None
+                    if sound_kind in ("golo", "vaia") and prev_sound_kind != sound_kind:
+                        sound_to_count = sound_kind
+                    display_manager.set_active_team(bgr_to_primary_label_and_bgr(team_color)[0])
+                    display_manager.update_stats(faces, sound_to_count, team_color)
 
                     # Demo mode: show a solid background of the primary team color instead of camera frames
                     if DISPLAY_MODE == "demo":
@@ -1186,7 +1203,8 @@ def run_loop(backend: PiBackend, interval: float, display: bool, mode: str = "no
                         # fill with saturated primary team color (BGR)
                         _, saturated = bgr_to_primary_label_and_bgr(team_color)
                         blank[:] = saturated
-                        display_manager.render(blank, faces, noise, message, team_color, sound_label, sound_kind)
+                            display_manager.set_active_team(bgr_to_primary_label_and_bgr(team_color)[0])
+                            display_manager.render(blank, faces, noise, message, team_color, sound_label, sound_kind)
                         cv2.imshow(WINDOW_NAME, blank)
                     else:
                         # normal/debug: render the actual camera frame with overlays
@@ -1213,6 +1231,7 @@ def run_loop(backend: PiBackend, interval: float, display: bool, mode: str = "no
                         blank = np.zeros((h, w, 3), dtype=np.uint8)
                         _, saturated = bgr_to_primary_label_and_bgr(team_color)
                         blank[:] = saturated
+                        display_manager.set_active_team(bgr_to_primary_label_and_bgr(team_color)[0])
                         display_manager.render(blank, [], noise, message, team_color, sound_label, sound_kind)
                         cv2.imshow(WINDOW_NAME, blank)
 
@@ -1239,6 +1258,9 @@ def run_loop(backend: PiBackend, interval: float, display: bool, mode: str = "no
                     trigger_golo(now, team_color)
                 elif sound_kind == "vaia":
                     trigger_vaia(now, team_color)
+
+                # update prev_sound_kind after triggers so we debounce counting
+                prev_sound_kind = sound_kind
 
                 # Determinar cor desejada, com prioridade para o override ativo
                 desired_color: Tuple[int, int, int] = (255, 255, 255)
