@@ -794,9 +794,9 @@ def classify_sound(noise_level: int, peak_freq: float, amp_duration: float) -> T
     # - Golo: freq > 500 Hz e ruido > 600 (ou pico alto prolongado)
     # - Vaia: freq 150-250 Hz e ruido ~300
     # - Conversa: freq 50-500 Hz e ruido 100-300 (neutro)
-    if  (amp_duration > 0.8 and peak_freq > 450 and noise_level > 500):
+    if  (amp_duration > 1.0 and peak_freq > 450 and noise_level > 500):
         return "Som: Grito prolongado", "golo"
-    if (150 <= peak_freq <= 320 and noise_level >= 250 and amp_duration > 0.8):
+    if (150 <= peak_freq <= 320 and noise_level >= 300 and amp_duration > 1.0):
         return "Som: Vaia prolongada", "vaia"
     # Se nÇœo atingir os limiares acima, considerar neutro/conversa.
     return "Som: Neutro", "neutro"
