@@ -943,10 +943,11 @@ class DisplayManager:
             cv2.putText(frame, f"Emocao: {pred}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
         # team color box
+        # team color box (top-right in normal/demo)
         x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
-        y1 = h - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
+        y1 = TEAM_BOX_MARGIN
         x2 = w - TEAM_BOX_MARGIN
-        y2 = h - TEAM_BOX_MARGIN
+        y2 = TEAM_BOX_MARGIN + TEAM_BOX_SIZE
         cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, thickness=-1)
 
         # If debug, draw individual bounding boxes and emotions
@@ -955,7 +956,7 @@ class DisplayManager:
                 cv2.rectangle(frame, (f.x, f.y), (f.x + f.w, f.y + f.h), (0, 255, 0), 2)
                 cv2.putText(frame, f.emotion, (f.x, max(f.y - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # draw small per-team statistics bar
+        # draw per-team statistics according to mode
         self._draw_team_stats(frame)
 
     def _predominant_emotion(self, faces: List[FaceEmotion]) -> Optional[str]:
@@ -1003,89 +1004,117 @@ class DisplayManager:
         # remember last label
         self._last_demo_label = label
     def _draw_team_stats(self, frame):
-        # Fixed-position stats at bottom-left with improved visuals
+        # New layout behaviour:
+        # - In normal/demo: single large container (avoids top-right team box)
+        # - In debug: three equal sections across bottom occupying 1/3 width each
         h, w, _ = frame.shape
-        left_margin = 10
-        bottom_margin = 10
-        # bar dimensions
-        bar_w_full = min(320, int(w * 0.45))
-        bar_h = 72 if h >= 240 else 54
-        x = left_margin
-        y = h - bar_h - bottom_margin
 
         order = [("red", (0, 0, 255)), ("green", (0, 255, 0)), ("blue", (255, 0, 0))]
 
-        # decide which labels to draw: all in debug, otherwise only active
-        if self.mode == "debug":
-            draw_labels = [l for l, _ in order]
-        else:
-            draw_labels = [self._active_label] if self._active_label in ("red", "green", "blue") else []
+        # team square region to avoid (top-right)
+        box_w = TEAM_BOX_SIZE
+        box_h = TEAM_BOX_SIZE
+        box_x1 = w - TEAM_BOX_MARGIN - box_w
+        box_y1 = TEAM_BOX_MARGIN
 
-        if not draw_labels:
-            return
+        if self.mode in ("normal", "demo"):
+            # container occupies most of the screen but avoids the top-right box
+            margin = 8
+            cont_x = margin
+            cont_y = margin
+            cont_w = w - margin * 2
+            cont_h = h - margin * 2
+            # if box overlaps container's right-top, reduce width to avoid overlap
+            if box_x1 < cont_x + cont_w:
+                cont_w = box_x1 - cont_x - 6
+                if cont_w < 80:
+                    cont_w = w - margin * 2 - box_w - 10
 
-        # compute max for normalization across displayed labels
-        max_stat = 1
-        for l in draw_labels:
-            s = self.team_stats.get(l, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
-            max_stat = max(max_stat, s.get("golo", 0), s.get("vaia", 0), s.get("Feliz", 0), s.get("Triste", 0))
+            # draw container background (transparent-like darker rectangle)
+            panel_bg = (30, 30, 30)
+            cv2.rectangle(frame, (cont_x, cont_y), (cont_x + cont_w, cont_y + cont_h), panel_bg, -1)
 
-        n = len(draw_labels)
-        section_w = int(bar_w_full / n)
-
-        def rounded_rect(img, x1, y1, x2, y2, color, radius=8):
-            cv2.rectangle(img, (x1 + radius, y1), (x2 - radius, y2), color, -1)
-            cv2.rectangle(img, (x1, y1 + radius), (x2, y2 - radius), color, -1)
-            cv2.circle(img, (x1 + radius, y1 + radius), radius, color, -1)
-            cv2.circle(img, (x2 - radius, y1 + radius), radius, color, -1)
-            cv2.circle(img, (x1 + radius, y2 - radius), radius, color, -1)
-            cv2.circle(img, (x2 - radius, y2 - radius), radius, color, -1)
-
-        for idx, label in enumerate(draw_labels):
-            color = dict(order)[label]
-            sx = x + idx * section_w
-            ex = sx + section_w - 6
-
-            # shadow
-            shadow_color = (20, 20, 20)
-            rounded_rect(frame, sx + 3, y + 3, ex + 3, y + bar_h + 3, shadow_color, radius=8)
-
-            # background panel
-            bg = tuple(max(0, c - 30) for c in color)
-            rounded_rect(frame, sx, y, ex, y + bar_h, bg, radius=8)
-
+            # show only active team
+            label = self._active_label
+            if label not in ("red", "green", "blue"):
+                return
             stats = self.team_stats.get(label, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
 
-            pad = 10
-            inner_w = (section_w - pad * 2) if section_w - pad * 2 > 20 else max(20, section_w - pad * 2)
+            # compute max for normalization
+            max_stat = max(1, stats.get("golo",0), stats.get("vaia",0), stats.get("Feliz",0), stats.get("Triste",0))
 
-            # compute color shades
-            happy = tuple(min(255, int(c * 0.75 + 255 * 0.25)) for c in color)
-            sad = tuple(max(0, int(c * 0.35)) for c in color)
+            # text title
+            title = f"Team: {label.upper()}"
+            cv2.putText(frame, title, (cont_x + 12, cont_y + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (230,230,230), 2, cv2.LINE_AA)
 
-            # emotions bar (top)
-            emo_y1 = y + 12
-            emo_y2 = emo_y1 + (bar_h - 32) // 2
-            feliz_len = int(inner_w * (stats.get("Feliz", 0) / max_stat))
-            triste_len = int(inner_w * (stats.get("Triste", 0) / max_stat))
-            # draw filled rounded-like bars (as rects with small circles for ends)
+            # bars positions
+            bar_len = min( int(cont_w * 0.85), 300 )
+            bar_x = cont_x + 12
+            next_y = cont_y + 40
+
+            # labels above bars, thin bars below
+            # Emotions bar
+            cv2.putText(frame, "Feliz / Triste", (bar_x, next_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (240,240,240), 1, cv2.LINE_AA)
+            bar_y1 = next_y + 6
+            bar_y2 = bar_y1 + 12
+            feliz_len = int(bar_len * (stats.get("Feliz",0) / max_stat))
+            triste_len = int(bar_len * (stats.get("Triste",0) / max_stat))
+            team_color = dict(order)[label]
+            happy_col = team_color
+            sad_col = (50,50,50)
+            # draw background track
+            cv2.rectangle(frame, (bar_x, bar_y1), (bar_x + bar_len, bar_y2), (60,60,60), -1)
             if feliz_len > 0:
-                cv2.rectangle(frame, (sx + pad, emo_y1), (sx + pad + feliz_len, emo_y2), happy, -1)
+                cv2.rectangle(frame, (bar_x, bar_y1), (bar_x + feliz_len, bar_y2), happy_col, -1)
             if triste_len > 0:
-                cv2.rectangle(frame, (sx + pad + feliz_len, emo_y1), (sx + pad + feliz_len + triste_len, emo_y2), sad, -1)
-            cv2.putText(frame, f"Feliz: {stats['Feliz']}  Triste: {stats['Triste']}", (sx + pad + 4, emo_y2 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.rectangle(frame, (bar_x + feliz_len, bar_y1), (bar_x + feliz_len + triste_len, bar_y2), sad_col, -1)
+            cv2.putText(frame, f"F: {stats['Feliz']}  T: {stats['Triste']}", (bar_x + bar_len + 8, bar_y2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230,230,230), 1, cv2.LINE_AA)
 
-            # sounds bar (bottom)
-            snd_y1 = emo_y2 + 8
-            snd_y2 = snd_y1 + (bar_h - 32) // 2
-            golo_len = int(inner_w * (stats.get("golo", 0) / max_stat))
-            vaia_len = int(inner_w * (stats.get("vaia", 0) / max_stat))
-            # use same team tint for sounds
+            # Sounds bar
+            next_y = bar_y2 + 18
+            cv2.putText(frame, "Golos / Vaias", (bar_x, next_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (240,240,240), 1, cv2.LINE_AA)
+            s_y1 = next_y + 6
+            s_y2 = s_y1 + 12
+            golo_len = int(bar_len * (stats.get("golo",0) / max_stat))
+            vaia_len = int(bar_len * (stats.get("vaia",0) / max_stat))
+            # draw background track
+            cv2.rectangle(frame, (bar_x, s_y1), (bar_x + bar_len, s_y2), (60,60,60), -1)
             if golo_len > 0:
-                cv2.rectangle(frame, (sx + pad, snd_y1), (sx + pad + golo_len, snd_y2), happy, -1)
+                cv2.rectangle(frame, (bar_x, s_y1), (bar_x + golo_len, s_y2), (0,200,0), -1)
             if vaia_len > 0:
-                cv2.rectangle(frame, (sx + pad + golo_len, snd_y1), (sx + pad + golo_len + vaia_len, snd_y2), sad, -1)
-            cv2.putText(frame, f"Golos: {stats['golo']}  Vaias: {stats['vaia']}", (sx + pad + 4, snd_y2 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.rectangle(frame, (bar_x + golo_len, s_y1), (bar_x + golo_len + vaia_len, s_y2), (0,0,200), -1)
+            cv2.putText(frame, f"G: {stats['golo']}  V: {stats['vaia']}", (bar_x + bar_len + 8, s_y2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230,230,230), 1, cv2.LINE_AA)
+
+        else:
+            # debug mode: three sections across bottom, each 1/3 width
+            margin = 6
+            section_w = (w - margin * 2) // 3
+            bar_len = int(section_w * 0.75)
+            bar_h = 10
+            y = h - 40
+            for idx, (label, color) in enumerate(order):
+                sx = margin + idx * section_w
+                ex = sx + section_w - 8
+                # header initials (F,T,G,V)
+                stats = self.team_stats.get(label, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
+                cv2.putText(frame, f"{label.upper()}", (sx + 4, y - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (230,230,230), 1, cv2.LINE_AA)
+                cv2.putText(frame, f"F:{stats['Feliz']} T:{stats['Triste']}", (sx + 4, y - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200,200,200), 1, cv2.LINE_AA)
+                # draw thin bar under text
+                # normalize using global max across all teams
+                global_max = 1
+                for l in ("red","green","blue"):
+                    s = self.team_stats.get(l, {})
+                    global_max = max(global_max, s.get('golo',0), s.get('vaia',0), s.get('Feliz',0), s.get('Triste',0))
+                g_len = int(bar_len * (stats.get('golo',0) / global_max))
+                v_len = int(bar_len * (stats.get('vaia',0) / global_max))
+                track_x = sx + 4
+                track_y1 = y + 4
+                track_y2 = track_y1 + bar_h
+                cv2.rectangle(frame, (track_x, track_y1), (track_x + bar_len, track_y2), (60,60,60), -1)
+                if g_len > 0:
+                    cv2.rectangle(frame, (track_x, track_y1), (track_x + g_len, track_y2), (0,200,0), -1)
+                if v_len > 0:
+                    cv2.rectangle(frame, (track_x + g_len, track_y1), (track_x + g_len + v_len, track_y2), (0,0,200), -1)
 
 
 
