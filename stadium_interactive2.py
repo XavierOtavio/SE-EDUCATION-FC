@@ -1003,67 +1003,90 @@ class DisplayManager:
         # remember last label
         self._last_demo_label = label
     def _draw_team_stats(self, frame):
-        # draw a compact horizontal bar with three colored sections (red, green, blue)
+        # Fixed-position stats at bottom-left with improved visuals
         h, w, _ = frame.shape
-        # scale bar dimensions for small resolutions
-        bar_w = min( int(w * 0.9), 360 )
-        bar_h = 60 if h >= 240 else 44
-        x = max(8, (w - bar_w) // 2)
-        y = h - bar_h - 8
-        section_w = bar_w // 3
+        left_margin = 10
+        bottom_margin = 10
+        # bar dimensions
+        bar_w_full = min(320, int(w * 0.45))
+        bar_h = 72 if h >= 240 else 54
+        x = left_margin
+        y = h - bar_h - bottom_margin
 
         order = [("red", (0, 0, 255)), ("green", (0, 255, 0)), ("blue", (255, 0, 0))]
-        i = 0
-        # Find max for scaling bars to improve visual clarity
-        max_stat = 1
-        for l in ("red", "green", "blue"):
-            s = self.team_stats.get(l, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
-            max_stat = max(max_stat, s.get("golo",0), s.get("vaia",0), s.get("Feliz",0), s.get("Triste",0))
 
         # decide which labels to draw: all in debug, otherwise only active
         if self.mode == "debug":
-            labels_to_draw = [l for l, _ in order]
+            draw_labels = [l for l, _ in order]
         else:
-            labels_to_draw = [self._active_label] if self._active_label in ("red","green","blue") else []
+            draw_labels = [self._active_label] if self._active_label in ("red", "green", "blue") else []
 
-        for label, color in order:
-            if label not in labels_to_draw:
-                i += 1
-                continue
-            sx = x + i * section_w
+        if not draw_labels:
+            return
+
+        # compute max for normalization across displayed labels
+        max_stat = 1
+        for l in draw_labels:
+            s = self.team_stats.get(l, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
+            max_stat = max(max_stat, s.get("golo", 0), s.get("vaia", 0), s.get("Feliz", 0), s.get("Triste", 0))
+
+        n = len(draw_labels)
+        section_w = int(bar_w_full / n)
+
+        def rounded_rect(img, x1, y1, x2, y2, color, radius=8):
+            cv2.rectangle(img, (x1 + radius, y1), (x2 - radius, y2), color, -1)
+            cv2.rectangle(img, (x1, y1 + radius), (x2, y2 - radius), color, -1)
+            cv2.circle(img, (x1 + radius, y1 + radius), radius, color, -1)
+            cv2.circle(img, (x2 - radius, y1 + radius), radius, color, -1)
+            cv2.circle(img, (x1 + radius, y2 - radius), radius, color, -1)
+            cv2.circle(img, (x2 - radius, y2 - radius), radius, color, -1)
+
+        for idx, label in enumerate(draw_labels):
+            color = dict(order)[label]
+            sx = x + idx * section_w
             ex = sx + section_w - 6
-            # background subtle
-            bg = tuple(max(0, c - 40) for c in color)
-            cv2.rectangle(frame, (sx, y), (ex, y + bar_h), bg, -1)
+
+            # shadow
+            shadow_color = (20, 20, 20)
+            rounded_rect(frame, sx + 3, y + 3, ex + 3, y + bar_h + 3, shadow_color, radius=8)
+
+            # background panel
+            bg = tuple(max(0, c - 30) for c in color)
+            rounded_rect(frame, sx, y, ex, y + bar_h, bg, radius=8)
 
             stats = self.team_stats.get(label, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
-            # Draw two horizontal bars per section: emotions (top) and sounds (bottom)
-            pad = 6
-            inner_w = section_w - pad * 2
-            # emotions bar
-            emo_ratio = stats.get("Feliz",0) / max_stat
-            sad_ratio = stats.get("Triste",0) / max_stat
-            emo_y1 = y + 8
-            emo_y2 = emo_y1 + (bar_h - 24) // 2
-            # draw Feliz portion
-            cv2.rectangle(frame, (sx + pad, emo_y1), (sx + pad + int(inner_w * emo_ratio), emo_y2), (0, 200, 200), -1)
-            # draw Triste portion stacked to right of Feliz for clarity
-            cv2.rectangle(frame, (sx + pad + int(inner_w * emo_ratio), emo_y1), (sx + pad + int(inner_w * (emo_ratio + sad_ratio)), emo_y2), (50, 50, 80), -1)
-            # label
-            cv2.putText(frame, f"F:{stats['Feliz']} T:{stats['Triste']}", (sx + pad + 2, emo_y2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1, cv2.LINE_AA)
 
-            # sounds bar
-            snd_y1 = emo_y2 + 6
-            snd_y2 = snd_y1 + (bar_h - 24) // 2
-            golo_ratio = stats.get("golo",0) / max_stat
-            vaia_ratio = stats.get("vaia",0) / max_stat
-            cv2.rectangle(frame, (sx + pad, snd_y1), (sx + pad + int(inner_w * golo_ratio), snd_y2), (0, 200, 0), -1)
-            cv2.rectangle(frame, (sx + pad + int(inner_w * golo_ratio), snd_y1), (sx + pad + int(inner_w * (golo_ratio + vaia_ratio)), snd_y2), (0, 0, 200), -1)
-            cv2.putText(frame, f"G:{stats['golo']} V:{stats['vaia']}", (sx + pad + 2, snd_y2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1, cv2.LINE_AA)
+            pad = 10
+            inner_w = (section_w - pad * 2) if section_w - pad * 2 > 20 else max(20, section_w - pad * 2)
 
-            # draw separator line
-            cv2.rectangle(frame, (ex + 2, y), (ex + 4, y + bar_h), (30,30,30), -1)
-            i += 1
+            # compute color shades
+            happy = tuple(min(255, int(c * 0.75 + 255 * 0.25)) for c in color)
+            sad = tuple(max(0, int(c * 0.35)) for c in color)
+
+            # emotions bar (top)
+            emo_y1 = y + 12
+            emo_y2 = emo_y1 + (bar_h - 32) // 2
+            feliz_len = int(inner_w * (stats.get("Feliz", 0) / max_stat))
+            triste_len = int(inner_w * (stats.get("Triste", 0) / max_stat))
+            # draw filled rounded-like bars (as rects with small circles for ends)
+            if feliz_len > 0:
+                cv2.rectangle(frame, (sx + pad, emo_y1), (sx + pad + feliz_len, emo_y2), happy, -1)
+            if triste_len > 0:
+                cv2.rectangle(frame, (sx + pad + feliz_len, emo_y1), (sx + pad + feliz_len + triste_len, emo_y2), sad, -1)
+            cv2.putText(frame, f"Feliz: {stats['Feliz']}  Triste: {stats['Triste']}", (sx + pad + 4, emo_y2 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+            # sounds bar (bottom)
+            snd_y1 = emo_y2 + 8
+            snd_y2 = snd_y1 + (bar_h - 32) // 2
+            golo_len = int(inner_w * (stats.get("golo", 0) / max_stat))
+            vaia_len = int(inner_w * (stats.get("vaia", 0) / max_stat))
+            # use same team tint for sounds
+            if golo_len > 0:
+                cv2.rectangle(frame, (sx + pad, snd_y1), (sx + pad + golo_len, snd_y2), happy, -1)
+            if vaia_len > 0:
+                cv2.rectangle(frame, (sx + pad + golo_len, snd_y1), (sx + pad + golo_len + vaia_len, snd_y2), sad, -1)
+            cv2.putText(frame, f"Golos: {stats['golo']}  Vaias: {stats['vaia']}", (sx + pad + 4, snd_y2 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
 
 
 
