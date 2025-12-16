@@ -1203,8 +1203,8 @@ def run_loop(backend: PiBackend, interval: float, display: bool, mode: str = "no
                         # fill with saturated primary team color (BGR)
                         _, saturated = bgr_to_primary_label_and_bgr(team_color)
                         blank[:] = saturated
-                            display_manager.set_active_team(bgr_to_primary_label_and_bgr(team_color)[0])
-                            display_manager.render(blank, faces, noise, message, team_color, sound_label, sound_kind)
+                        display_manager.set_active_team(bgr_to_primary_label_and_bgr(team_color)[0])
+                        display_manager.render(blank, faces, noise, message, team_color, sound_label, sound_kind)
                         cv2.imshow(WINDOW_NAME, blank)
                     else:
                         # normal/debug: render the actual camera frame with overlays
