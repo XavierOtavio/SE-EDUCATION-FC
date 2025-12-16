@@ -948,13 +948,14 @@ class DisplayManager:
                 cv2.rectangle(frame, (f.x, f.y), (f.x + f.w, f.y + f.h), (0, 255, 0), 2)
                 cv2.putText(frame, f.emotion, (f.x, max(f.y - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # team color box (saturated primary) visible in normal/debug/demo
-        sat_color = bgr_to_primary_label_and_bgr(team_color)[1]
-        x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
-        y1 = TEAM_BOX_MARGIN
-        x2 = w - TEAM_BOX_MARGIN
-        y2 = TEAM_BOX_MARGIN + TEAM_BOX_SIZE
-        cv2.rectangle(frame, (x1, y1), (x2, y2), sat_color, thickness=-1)
+        # team color box: show only in normal/demo (hide in debug)
+        if self.mode in ("normal", "demo"):
+            sat_color = bgr_to_primary_label_and_bgr(team_color)[1]
+            x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
+            y1 = TEAM_BOX_MARGIN
+            x2 = w - TEAM_BOX_MARGIN
+            y2 = TEAM_BOX_MARGIN + TEAM_BOX_SIZE
+            cv2.rectangle(frame, (x1, y1), (x2, y2), sat_color, thickness=-1)
 
         # draw per-team statistics according to mode
         self._draw_team_stats(frame)
@@ -1035,11 +1036,12 @@ class DisplayManager:
             cont_w = w - margin * 2
             cont_y = h - margin - cont_h
 
-            # draw panel background with slight shadow
+            # draw panel background only in demo (normal should be transparent)
             shadow_offset = 3
             panel_bg = (28, 28, 28)
-            cv2.rectangle(frame, (cont_x + shadow_offset, cont_y + shadow_offset), (cont_x + cont_w + shadow_offset, cont_y + cont_h + shadow_offset), (15,15,15), -1)
-            cv2.rectangle(frame, (cont_x, cont_y), (cont_x + cont_w, cont_y + cont_h), panel_bg, -1)
+            if self.mode == "demo":
+                cv2.rectangle(frame, (cont_x + shadow_offset, cont_y + shadow_offset), (cont_x + cont_w + shadow_offset, cont_y + cont_h + shadow_offset), (15,15,15), -1)
+                cv2.rectangle(frame, (cont_x, cont_y), (cont_x + cont_w, cont_y + cont_h), panel_bg, -1)
 
             # show only active team
             label = self._active_label
@@ -1057,15 +1059,22 @@ class DisplayManager:
             # fixed max bar length (not exceed visual area)
             bar_len = min(int(cont_w * 0.62), 360)
             bar_x = cont_x + 14
-            current_y = cont_y + 46
-            gap = 12
+            bar_h = 10
+            gap = 10
+            # compute required height for two bars + title
+            required_h = 28 + (bar_h + gap) * 2 + 8
+            if cont_h < required_h:
+                cont_h = required_h
+                cont_y = h - margin - cont_h
+            # place bars with some top padding
+            current_y = cont_y + 28
 
             # Emotions bar (full words with counts in legend)
             label_text = f"Felizes: {stats['Feliz']}  /  Tristes: {stats['Triste']}"
             cv2.putText(frame, label_text, (bar_x, current_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220,220,220), 1, cv2.LINE_AA)
-            b_y1 = current_y + 8
-            b_y2 = b_y1 + 12
-            # shadow
+            b_y1 = current_y + 6
+            b_y2 = b_y1 + bar_h
+            # shadow and track
             rounded_rect(frame, bar_x + 2, b_y1 + 2, bar_x + bar_len + 2, b_y2 + 2, (10,10,10), radius=6)
             rounded_rect(frame, bar_x, b_y1, bar_x + bar_len, b_y2, (60,60,60), radius=6)
             feliz_len = int(bar_len * (stats.get("Feliz",0) / max_stat))
@@ -1078,8 +1087,8 @@ class DisplayManager:
             # Sounds bar (full words)
             current_y = b_y2 + gap
             cv2.putText(frame, f"Golo: {stats['golo']}  /  Vaia: {stats['vaia']}", (bar_x, current_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220,220,220), 1, cv2.LINE_AA)
-            s_y1 = current_y + 8
-            s_y2 = s_y1 + 12
+            s_y1 = current_y + 6
+            s_y2 = s_y1 + bar_h
             rounded_rect(frame, bar_x + 2, s_y1 + 2, bar_x + bar_len + 2, s_y2 + 2, (10,10,10), radius=6)
             rounded_rect(frame, bar_x, s_y1, bar_x + bar_len, s_y2, (60,60,60), radius=6)
             golo_len = int(bar_len * (stats.get("golo",0) / max_stat))
@@ -1120,6 +1129,8 @@ class DisplayManager:
                     rounded_rect(frame, track_x, track_y1, track_x + g_len, track_y2, (0,180,0), radius=5)
                 if v_len > 0:
                     rounded_rect(frame, track_x + g_len, track_y1, track_x + g_len + v_len, track_y2, (0,0,180), radius=5)
+                # show G/V counts below each track for visibility in debug
+                cv2.putText(frame, f"G:{stats['golo']} V:{stats['vaia']}", (track_x, track_y2 + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220,220,220), 1, cv2.LINE_AA)
 
 
 
