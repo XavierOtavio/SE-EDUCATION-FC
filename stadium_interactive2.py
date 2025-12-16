@@ -948,14 +948,13 @@ class DisplayManager:
                 cv2.rectangle(frame, (f.x, f.y), (f.x + f.w, f.y + f.h), (0, 255, 0), 2)
                 cv2.putText(frame, f.emotion, (f.x, max(f.y - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # team color box: show only in normal/demo (hide in debug)
-        if self.mode in ("normal", "demo"):
-            sat_color = bgr_to_primary_label_and_bgr(team_color)[1]
-            x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
-            y1 = TEAM_BOX_MARGIN
-            x2 = w - TEAM_BOX_MARGIN
-            y2 = TEAM_BOX_MARGIN + TEAM_BOX_SIZE
-            cv2.rectangle(frame, (x1, y1), (x2, y2), sat_color, thickness=-1)
+        # team color box: show saturated primary color in all modes
+        sat_color = bgr_to_primary_label_and_bgr(team_color)[1]
+        x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
+        y1 = TEAM_BOX_MARGIN
+        x2 = w - TEAM_BOX_MARGIN
+        y2 = TEAM_BOX_MARGIN + TEAM_BOX_SIZE
+        cv2.rectangle(frame, (x1, y1), (x2, y2), sat_color, thickness=-1)
 
         # draw per-team statistics according to mode
         self._draw_team_stats(frame)
@@ -1056,10 +1055,10 @@ class DisplayManager:
             color_map = {k: c for k, c, _ in order}
             team_color_display = color_map.get(label, (200,200,200))
 
-            # fixed max bar length (not exceed visual area)
-            bar_len = min(int(cont_w * 0.62), 360)
+            # fixed max bar length (stable across frames) - based on screen width
+            bar_len = min(int(w * 0.5), 360)
             bar_x = cont_x + 14
-            bar_h = 10
+            bar_h = 8
             gap = 10
             # compute required height for two bars + title
             required_h = 28 + (bar_h + gap) * 2 + 8
@@ -1074,11 +1073,15 @@ class DisplayManager:
             cv2.putText(frame, label_text, (bar_x, current_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220,220,220), 1, cv2.LINE_AA)
             b_y1 = current_y + 6
             b_y2 = b_y1 + bar_h
-            # shadow and track
+            # stable track (fixed length) and proportional fills based on totals
             rounded_rect(frame, bar_x + 2, b_y1 + 2, bar_x + bar_len + 2, b_y2 + 2, (10,10,10), radius=6)
             rounded_rect(frame, bar_x, b_y1, bar_x + bar_len, b_y2, (60,60,60), radius=6)
-            feliz_len = int(bar_len * (stats.get("Feliz",0) / max_stat))
-            triste_len = int(bar_len * (stats.get("Triste",0) / max_stat))
+            emo_total = max(1, stats.get("Feliz",0) + stats.get("Triste",0))
+            feliz_len = int(bar_len * (stats.get("Feliz",0) / emo_total))
+            triste_len = int(bar_len * (stats.get("Triste",0) / emo_total))
+            # ensure total does not exceed bar_len due to rounding
+            if feliz_len + triste_len > bar_len:
+                triste_len = bar_len - feliz_len
             if feliz_len > 0:
                 rounded_rect(frame, bar_x, b_y1, bar_x + feliz_len, b_y2, team_color_display, radius=6)
             if triste_len > 0:
@@ -1091,8 +1094,11 @@ class DisplayManager:
             s_y2 = s_y1 + bar_h
             rounded_rect(frame, bar_x + 2, s_y1 + 2, bar_x + bar_len + 2, s_y2 + 2, (10,10,10), radius=6)
             rounded_rect(frame, bar_x, s_y1, bar_x + bar_len, s_y2, (60,60,60), radius=6)
-            golo_len = int(bar_len * (stats.get("golo",0) / max_stat))
-            vaia_len = int(bar_len * (stats.get("vaia",0) / max_stat))
+            snd_total = max(1, stats.get("golo",0) + stats.get("vaia",0))
+            golo_len = int(bar_len * (stats.get("golo",0) / snd_total))
+            vaia_len = int(bar_len * (stats.get("vaia",0) / snd_total))
+            if golo_len + vaia_len > bar_len:
+                vaia_len = bar_len - golo_len
             if golo_len > 0:
                 rounded_rect(frame, bar_x, s_y1, bar_x + golo_len, s_y2, (0,180,0), radius=6)
             if vaia_len > 0:
@@ -1115,22 +1121,10 @@ class DisplayManager:
                 sx = margin + idx * section_w
                 # Header: abbreviated counts only (no team name)
                 stats = self.team_stats.get(label, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
-                cv2.putText(frame, f"F:{stats['Feliz']} T:{stats['Triste']}", (sx + 6, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220,220,220), 1, cv2.LINE_AA)
-                # thin rounded track with shadow
-                track_x = sx + 6
-                track_y1 = y + 2
-                track_y2 = track_y1 + bar_h
-                # shadow
-                rounded_rect(frame, track_x + 2, track_y1 + 2, track_x + bar_len + 2, track_y2 + 2, (10,10,10), radius=5)
-                rounded_rect(frame, track_x, track_y1, track_x + bar_len, track_y2, (60,60,60), radius=5)
-                g_len = int(bar_len * (stats.get('golo',0) / global_max))
-                v_len = int(bar_len * (stats.get('vaia',0) / global_max))
-                if g_len > 0:
-                    rounded_rect(frame, track_x, track_y1, track_x + g_len, track_y2, (0,180,0), radius=5)
-                if v_len > 0:
-                    rounded_rect(frame, track_x + g_len, track_y1, track_x + g_len + v_len, track_y2, (0,0,180), radius=5)
-                # show G/V counts below each track for visibility in debug
-                cv2.putText(frame, f"G:{stats['golo']} V:{stats['vaia']}", (track_x, track_y2 + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220,220,220), 1, cv2.LINE_AA)
+                # show team name and counts; no progress bars in debug
+                cv2.putText(frame, team_name, (sx + 6, y - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
+                cv2.putText(frame, f"F:{stats['Feliz']} T:{stats['Triste']}", (sx + 6, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220,220,220), 1, cv2.LINE_AA)
+                cv2.putText(frame, f"G:{stats['golo']} V:{stats['vaia']}", (sx + 6, y + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200,200,200), 1, cv2.LINE_AA)
 
 
 
