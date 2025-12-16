@@ -948,13 +948,13 @@ class DisplayManager:
                 cv2.rectangle(frame, (f.x, f.y), (f.x + f.w, f.y + f.h), (0, 255, 0), 2)
                 cv2.putText(frame, f.emotion, (f.x, max(f.y - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # team color box only in normal/demo (not in debug)
-        if self.mode in ("normal", "demo"):
-            x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
-            y1 = TEAM_BOX_MARGIN
-            x2 = w - TEAM_BOX_MARGIN
-            y2 = TEAM_BOX_MARGIN + TEAM_BOX_SIZE
-            cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, thickness=-1)
+        # team color box (saturated primary) visible in normal/debug/demo
+        sat_color = bgr_to_primary_label_and_bgr(team_color)[1]
+        x1 = w - TEAM_BOX_MARGIN - TEAM_BOX_SIZE
+        y1 = TEAM_BOX_MARGIN
+        x2 = w - TEAM_BOX_MARGIN
+        y2 = TEAM_BOX_MARGIN + TEAM_BOX_SIZE
+        cv2.rectangle(frame, (x1, y1), (x2, y2), sat_color, thickness=-1)
 
         # draw per-team statistics according to mode
         self._draw_team_stats(frame)
@@ -1012,6 +1012,15 @@ class DisplayManager:
         # team order and display names
         order = [("red", (0, 0, 255), "Benfica"), ("green", (0, 255, 0), "Sporting"), ("blue", (255, 0, 0), "Porto")]
 
+        # helper: rounded rect usable in both branches
+        def rounded_rect(img, x1, y1, x2, y2, color, radius=6):
+            cv2.rectangle(img, (x1 + radius, y1), (x2 - radius, y2), color, -1)
+            cv2.rectangle(img, (x1, y1 + radius), (x2, y2 - radius), color, -1)
+            cv2.circle(img, (x1 + radius, y1 + radius), radius, color, -1)
+            cv2.circle(img, (x2 - radius, y1 + radius), radius, color, -1)
+            cv2.circle(img, (x1 + radius, y2 - radius), radius, color, -1)
+            cv2.circle(img, (x2 - radius, y2 - radius), radius, color, -1)
+
         # team square region to avoid (top-right)
         box_w = TEAM_BOX_SIZE
         box_h = TEAM_BOX_SIZE
@@ -1041,23 +1050,9 @@ class DisplayManager:
             # compute max for normalization
             max_stat = max(1, stats.get("golo",0), stats.get("vaia",0), stats.get("Feliz",0), stats.get("Triste",0))
 
-            # map label to name and color
-            name_map = {k: n for k, _, n in order}
+            # map label to color
             color_map = {k: c for k, c, _ in order}
-            team_name = name_map.get(label, label.capitalize())
             team_color_display = color_map.get(label, (200,200,200))
-
-            # title
-            cv2.putText(frame, team_name, (cont_x + 14, cont_y + 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (240,240,240), 2, cv2.LINE_AA)
-
-            # helper: rounded rect for bars
-            def rounded_rect(img, x1, y1, x2, y2, color, radius=6):
-                cv2.rectangle(img, (x1 + radius, y1), (x2 - radius, y2), color, -1)
-                cv2.rectangle(img, (x1, y1 + radius), (x2, y2 - radius), color, -1)
-                cv2.circle(img, (x1 + radius, y1 + radius), radius, color, -1)
-                cv2.circle(img, (x2 - radius, y1 + radius), radius, color, -1)
-                cv2.circle(img, (x1 + radius, y2 - radius), radius, color, -1)
-                cv2.circle(img, (x2 - radius, y2 - radius), radius, color, -1)
 
             # fixed max bar length (not exceed visual area)
             bar_len = min(int(cont_w * 0.62), 360)
@@ -1065,8 +1060,8 @@ class DisplayManager:
             current_y = cont_y + 46
             gap = 12
 
-            # Emotions bar (full words)
-            label_text = "Felizes / Tristes"
+            # Emotions bar (full words with counts in legend)
+            label_text = f"Felizes: {stats['Feliz']}  /  Tristes: {stats['Triste']}"
             cv2.putText(frame, label_text, (bar_x, current_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220,220,220), 1, cv2.LINE_AA)
             b_y1 = current_y + 8
             b_y2 = b_y1 + 12
@@ -1079,11 +1074,10 @@ class DisplayManager:
                 rounded_rect(frame, bar_x, b_y1, bar_x + feliz_len, b_y2, team_color_display, radius=6)
             if triste_len > 0:
                 rounded_rect(frame, bar_x + feliz_len, b_y1, bar_x + feliz_len + triste_len, b_y2, (80,80,80), radius=6)
-            cv2.putText(frame, f"Felizes: {stats['Feliz']}  Tristes: {stats['Triste']}", (bar_x + bar_len + 12, b_y2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230,230,230), 1, cv2.LINE_AA)
 
             # Sounds bar (full words)
             current_y = b_y2 + gap
-            cv2.putText(frame, "Golos / Vaias", (bar_x, current_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220,220,220), 1, cv2.LINE_AA)
+            cv2.putText(frame, f"Golo: {stats['golo']}  /  Vaia: {stats['vaia']}", (bar_x, current_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220,220,220), 1, cv2.LINE_AA)
             s_y1 = current_y + 8
             s_y2 = s_y1 + 12
             rounded_rect(frame, bar_x + 2, s_y1 + 2, bar_x + bar_len + 2, s_y2 + 2, (10,10,10), radius=6)
@@ -1094,7 +1088,6 @@ class DisplayManager:
                 rounded_rect(frame, bar_x, s_y1, bar_x + golo_len, s_y2, (0,180,0), radius=6)
             if vaia_len > 0:
                 rounded_rect(frame, bar_x + golo_len, s_y1, bar_x + golo_len + vaia_len, s_y2, (0,0,180), radius=6)
-            cv2.putText(frame, f"Golo: {stats['golo']}  Vaia: {stats['vaia']}", (bar_x + bar_len + 12, s_y2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230,230,230), 1, cv2.LINE_AA)
 
         else:
             # debug mode: three sections across bottom, each 1/3 width
@@ -1111,11 +1104,9 @@ class DisplayManager:
 
             for idx, (label, color, team_name) in enumerate(order):
                 sx = margin + idx * section_w
-                # Header: team name and abbreviated counts
+                # Header: abbreviated counts only (no team name)
                 stats = self.team_stats.get(label, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
-                cv2.putText(frame, team_name, (sx + 6, y - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
-                # Abbreviations in debug
-                cv2.putText(frame, f"F:{stats['Feliz']} T:{stats['Triste']}", (sx + 6, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220,220,220), 1, cv2.LINE_AA)
+                cv2.putText(frame, f"F:{stats['Feliz']} T:{stats['Triste']}", (sx + 6, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220,220,220), 1, cv2.LINE_AA)
                 # thin rounded track with shadow
                 track_x = sx + 6
                 track_y1 = y + 2
