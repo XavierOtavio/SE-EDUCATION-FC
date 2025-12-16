@@ -1069,7 +1069,7 @@ class DisplayManager:
             current_y = cont_y + 28
 
             # Emotions bar (full words with counts in legend)
-            label_text = f"Felizes: {stats['Feliz']}  /  Tristes: {stats['Triste']}"
+            label_text = f"Felize: {stats['Feliz']}  /  Triste: {stats['Triste']}"
             cv2.putText(frame, label_text, (bar_x, current_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220,220,220), 1, cv2.LINE_AA)
             b_y1 = current_y + 6
             b_y2 = b_y1 + bar_h
