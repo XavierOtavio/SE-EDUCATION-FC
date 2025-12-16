@@ -882,6 +882,22 @@ class DisplayManager:
             "green": {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0},
             "blue": {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0},
         }
+        # load team symbols (optional); keep original size and allow resizing per-frame
+        base = Path(__file__).resolve().parent
+        self.symbol_files = {
+            "red": base / "benfica.png",
+            "blue": base / "porto.png",
+            "green": base / "sporting.png",
+        }
+        self.symbols = {}
+        for k, p in self.symbol_files.items():
+            try:
+                img = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+                if img is not None and img.size > 0:
+                    self.symbols[k] = img
+            except Exception:
+                self.symbols[k] = None
+        self._last_demo_label: Optional[str] = None
 
     def _color_to_key(self, color: Tuple[int, int, int]) -> str:
         return f"{color[0]}-{color[1]}-{color[2]}"
@@ -911,15 +927,13 @@ class DisplayManager:
             if pred:
                 cv2.putText(frame, f"Emocao: {pred}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # Team color tiny box
-            x1 = w - TEAM_BOX_MARGIN - 40
-            y1 = h - TEAM_BOX_MARGIN - 40
-            x2 = w - TEAM_BOX_MARGIN
-            y2 = h - TEAM_BOX_MARGIN
-            cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, thickness=-1)
-
             # Small counters top-right (per-team stats)
             self._draw_team_stats(frame)
+
+            # In demo mode, render central team symbol (if available) instead of corner box
+            label, _ = bgr_to_primary_label_and_bgr(team_color)
+            if label in self.symbols and self.symbols.get(label) is not None:
+                self._render_demo_symbol(frame, label)
 
             return
 
@@ -953,29 +967,94 @@ class DisplayManager:
             if f.emotion in counts:
                 counts[f.emotion] += 1
         return max(counts.items(), key=lambda it: it[1])[0]
+    
+    def _render_demo_symbol(self, frame, label: str) -> None:
+        """Overlay the team symbol (with alpha) centered and scaled to frame size."""
+        img = self.symbols.get(label)
+        if img is None:
+            return
+        h, w, _ = frame.shape
+        # compute desired symbol size: cap to 40% of width and 40% of height
+        max_w = int(w * 0.4)
+        max_h = int(h * 0.4)
+        ih, iw = img.shape[:2]
+        scale = min(max_w / iw, max_h / ih, 1.0)
+        nw = max(16, int(iw * scale))
+        nh = max(16, int(ih * scale))
+        try:
+            symbol = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+        except Exception:
+            symbol = img
+
+        # position center
+        cx = w // 2
+        cy = h // 2
+        sx = max(0, cx - nw // 2)
+        sy = max(0, cy - nh // 2)
+        ex = min(w, sx + nw)
+        ey = min(h, sy + nh)
+
+        # Overlay handling alpha channel
+        if symbol.shape[2] == 4:
+            alpha = symbol[:, :, 3] / 255.0
+            for c in range(3):
+                frame[sy:ey, sx:ex, c] = (alpha * symbol[:, :, c] + (1 - alpha) * frame[sy:ey, sx:ex, c]).astype(frame.dtype)
+        else:
+            frame[sy:ey, sx:ex] = symbol
+        # remember last label
+        self._last_demo_label = label
     def _draw_team_stats(self, frame):
         # draw a compact horizontal bar with three colored sections (red, green, blue)
         h, w, _ = frame.shape
-        bar_w = 300
-        bar_h = 70
-        x = 10
-        y = h - bar_h - 10
+        # scale bar dimensions for small resolutions
+        bar_w = min( int(w * 0.9), 360 )
+        bar_h = 60 if h >= 240 else 44
+        x = max(8, (w - bar_w) // 2)
+        y = h - bar_h - 8
         section_w = bar_w // 3
 
         order = [("red", (0, 0, 255)), ("green", (0, 255, 0)), ("blue", (255, 0, 0))]
         i = 0
+        # Find max for scaling bars to improve visual clarity
+        max_stat = 1
+        for l in ("red", "green", "blue"):
+            s = self.team_stats.get(l, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
+            max_stat = max(max_stat, s.get("golo",0), s.get("vaia",0), s.get("Feliz",0), s.get("Triste",0))
+
         for label, color in order:
             sx = x + i * section_w
-            ex = sx + section_w - 4
-            # background color (slightly darkened to allow white text)
-            bg = tuple(max(0, c - 20) for c in color)
+            ex = sx + section_w - 6
+            # background subtle
+            bg = tuple(max(0, c - 40) for c in color)
             cv2.rectangle(frame, (sx, y), (ex, y + bar_h), bg, -1)
+
             stats = self.team_stats.get(label, {"golo": 0, "vaia": 0, "Feliz": 0, "Triste": 0})
-            # show emotion counts on first line
-            txt1 = f"F:{stats['Feliz']}  T:{stats['Triste']}"
-            txt2 = f"G:{stats['golo']}  V:{stats['vaia']}"
-            cv2.putText(frame, txt1, (sx + 8, y + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, txt2, (sx + 8, y + 52), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+            # Draw two horizontal bars per section: emotions (top) and sounds (bottom)
+            pad = 6
+            inner_w = section_w - pad * 2
+            # emotions bar
+            emo_ratio = stats.get("Feliz",0) / max_stat
+            sad_ratio = stats.get("Triste",0) / max_stat
+            emo_y1 = y + 8
+            emo_y2 = emo_y1 + (bar_h - 24) // 2
+            # draw Feliz portion
+            cv2.rectangle(frame, (sx + pad, emo_y1), (sx + pad + int(inner_w * emo_ratio), emo_y2), (0, 200, 200), -1)
+            # draw Triste portion stacked to right of Feliz for clarity
+            cv2.rectangle(frame, (sx + pad + int(inner_w * emo_ratio), emo_y1), (sx + pad + int(inner_w * (emo_ratio + sad_ratio)), emo_y2), (50, 50, 80), -1)
+            # label
+            cv2.putText(frame, f"F:{stats['Feliz']} T:{stats['Triste']}", (sx + pad + 2, emo_y2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1, cv2.LINE_AA)
+
+            # sounds bar
+            snd_y1 = emo_y2 + 6
+            snd_y2 = snd_y1 + (bar_h - 24) // 2
+            golo_ratio = stats.get("golo",0) / max_stat
+            vaia_ratio = stats.get("vaia",0) / max_stat
+            cv2.rectangle(frame, (sx + pad, snd_y1), (sx + pad + int(inner_w * golo_ratio), snd_y2), (0, 200, 0), -1)
+            cv2.rectangle(frame, (sx + pad + int(inner_w * golo_ratio), snd_y1), (sx + pad + int(inner_w * (golo_ratio + vaia_ratio)), snd_y2), (0, 0, 200), -1)
+            cv2.putText(frame, f"G:{stats['golo']} V:{stats['vaia']}", (sx + pad + 2, snd_y2 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1, cv2.LINE_AA)
+
+            # draw separator line
+            cv2.rectangle(frame, (ex + 2, y), (ex + 4, y + bar_h), (30,30,30), -1)
             i += 1
 
 
