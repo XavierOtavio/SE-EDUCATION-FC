@@ -171,6 +171,12 @@ Um sistema embebido integra **hardware e software dedicados** para executar uma 
 
 ---
 
+### Gabarito resumido — Fundamentos
+1. Sistema com função específica, recursos limitados e requisitos de previsibilidade/tempo real (ex.: determinismo, baixo consumo, robustez).  
+2. a) embebido, b) embebido, c) embebido, d) embebido.  
+3. 3ª geração (32 bits + DSP) pelo Cortex‑M4 e recursos associados.  
+4. Fiabilidade = funcionamento correto contínuo; falhas podem causar paragens, danos ou riscos; técnicas: redundância, watchdog, testes rigorosos/ECC.
+
 
 # ⭐ 2. I/O Digital e Analógica + Sensores e Atuadores
 *(Aula Teórica 3 — slides 3–4; Aula Teórica 4 — slides 7–15)*
@@ -312,6 +318,14 @@ Exames adoram perguntas sobre isto.
 
 
 
+### Gabarito resumido — I/O e Sensores
+1. Digital é robusto por margens de ruído/thresholds internos; pequenas variações não mudam o estado lógico.  
+2. Ex.: digital (botão, leitura HIGH/LOW), analógico (LDR, leitura via ADC), serial I2C/SPI (IMU, leitura por registos).  
+3. a) bounce mecânico; b) RC/Schmitt trigger ou atraso por software.  
+4. Usar divisor de tensão/level shifter e proteção para limitar a 3.3 V.  
+5. Ex.: motor DC e LED (brilho/velocidade exigem controlo por PWM).  
+6. Lê LOW (0), pois 1.4 V < 2.0 V (threshold HIGH).
+
 # ⭐ 3. PWM, ADC, Amostragem, Quantização e Aliasing
 *(Aula Teórica 3 — slides 7–28)*
 
@@ -333,7 +347,9 @@ A Modulação por Largura de Pulso (PWM) é uma técnica digital utilizada para 
 - controlo térmico em resistências aquecedoras  
 
 ### Valor médio:
-$V_{médio} = duty\% \times V_{fonte}$
+```math
+V_{médio} = duty\% \times V_{fonte}
+```
 
 ### Observações importantes:
 - PWM não é DAC (conversor analógico‑digital); é apenas uma **aproximação temporal**  
@@ -348,19 +364,22 @@ O ADC converte uma tensão analógica contínua num valor discreto, representado
 
 ### Características principais
 - número de níveis:  
-
-$2^n$
+```math
+2^n
+```
 
 - resolução (step):  
-
-$step = \frac{V_{ref}}{2^n}$
+```math
+step = \frac{V_{ref}}{2^n}
+```
 
 - a resolução define o **incremento mínimo detetável**
 
 ### Exemplo rápido:
 ADC de **10 bits**, Vref = 5 V:  
-
-$step = \frac{5}{1024} = 4.88 \text{ mV}$
+```math
+step = \frac{5}{1024} = 4.88 \text{ mV}
+```
 
 
 ### Tipos de ADC mais comuns:
@@ -383,10 +402,9 @@ $step = \frac{5}{1024} = 4.88 \text{ mV}$
 *(ver slides 15–16)*
 
 O teorema afirma que a frequência de amostragem deve ser **pelo menos 2× a frequência máxima do sinal**:
-
-
-$f_s \geq 2 f_{max}$
-
+```math
+f_s \geq 2 f_{max}
+```
 
 Quando isto não acontece, perde‑se informação e ocorrem fenómenos de aliasing.
 
@@ -462,6 +480,13 @@ Um **filtro passa‑baixo analógico**, colocado antes do ADC, garante que a má
 
 
 
+### Gabarito resumido — PWM/ADC
+1. \( step = 3.3/4096 \approx 0.000805 \text{ V} \) (≈0.805 mV).  
+2. a) \( V_{médio} = 0.6 \times 5 = 3.0 \text{ V} \). b) Em motores/LEDs, o instantâneo é 0/5 V; a média só faz sentido com inércia/filtragem.  
+3. a) Sim, há aliasing (fs < 2f). b) \( f_{alias} = |10 - 12| = 2 \text{ Hz} \).  
+4. Lê o valor máximo (saturação); ocorre clipping e perda de informação.  
+5. Pulsos curtos não vencem inércia/atrito; torque médio baixo causa tremores.
+
 # ⭐ 4. Interfaces de Comunicação
 *(Aula Teórica 4 — slides 16–44)*
 
@@ -470,7 +495,7 @@ Dividem‑se em **série assíncrona**, **série síncrona** e **paralela**, cad
 
 ---
 
-# 4.1 UART — Assíncrona
+## 4.1 UART — Assíncrona
 *(ver slides 16–25)*
 
 A UART (Universal Asynchronous Receiver and Transmitter) é uma comunicação **série assíncrona**, ou seja, **não usa clock partilhado** entre emissor e recetor.
@@ -495,18 +520,18 @@ Exemplo: **8E1** (8 data, Even parity, 1 stop).
 O *baud rate* define **quantos símbolos por segundo** são enviados.  
 A duração de cada bit é:
 
-$
+```math
 T_{bit} = \frac{1}{baud}
-$
+```
 
 Ex.: baud = 9600 → $T_{bit}$ ≈ 104 μs.
 
 ### Eficiência
 Para 8 data bits, 1 paridade e 1 stop:
 
-$
+```math
 Ef = \frac{8}{8+1+1} = \frac{8}{11} \approx 73\%
-$
+```
 
 Quanto mais bits de controlo, menor a eficiência.
 
@@ -522,7 +547,7 @@ Quanto mais bits de controlo, menor a eficiência.
 
 ---
 
-# 4.2 SPI — Síncrona
+## 4.2 SPI — Síncrona
 *(ver slides 27–29)*
 
 SPI (Serial Peripheral Interface) é uma comunicação **série síncrona**, rápida e full‑duplex.
@@ -560,7 +585,7 @@ Exame pode pedir identificação do modo com base em diagramas.
 
 ---
 
-# 4.3 I2C — Síncrona, dois fios
+## 4.3 I2C — Síncrona, dois fios
 *(ver slides 30–39)*
 
 I2C (Inter‑Integrated Circuit) é comunicação **série síncrona**, master/slave, baseada em **endereçamento**, ideal para muitos dispositivos.
@@ -598,7 +623,7 @@ Se o slave reconhecer o endereço → envia ACK.
 
 ---
 
-# 4.4 Paralela
+## 4.4 Paralela
 *(ver slides 42–43)*
 
 Comunicação paralela transmite **vários bits em simultâneo**.
@@ -663,6 +688,14 @@ Comunicação paralela transmite **vários bits em simultâneo**.
 
 
 
+### Gabarito resumido — Comunicação
+1. UART: simples, 2 fios, baixa/média velocidade, ponto‑a‑ponto; SPI: muito rápido, mais fios, baixa escalabilidade; I2C: 2 fios, endereçado, velocidade média, alta escalabilidade.  
+2. Eficiência = \( 8/(8+0+2) = 80\% \).  
+3. I2C, por suportar vários dispositivos com 2 fios.  
+4. Start(0) + 8 data + paridade even + stop(1).  
+5. 3 linhas SS (uma por slave).  
+6. ACK confirma receção/endereço; NACK quando não reconhece o endereço ou está ocupado.
+
 # ⭐ 5. Sistemas de Tempo Real
 *(Aula Teórica 5 — slides 3–6)*
 
@@ -703,9 +736,9 @@ Esta interação introduz **atrasos**, que podem comprometer o controlo.
 - **Atraso de atuação (output delay):** tempo desde o comando até ao atuador reagir.
 
 ### Jitter
-$
+```math
 \text{Jitter} = \text{variação não determinística do atraso}
-$
+```
 
 - Pode causar instabilidade em sistemas de controlo.  
 - Comuns causas: interrupções, multitarefa, latência de comunicação.
@@ -798,6 +831,13 @@ Exemplos:
 
 
 
+### Gabarito resumido — Tempo Real
+1. ABS: Hard; media player: Soft; robot cirúrgico: Hard; monitor de glicose contínuo: Firm.  
+2. 12 + 20 + 8 = 40 ms → cumpre 50 ms; gargalo no cálculo; mitigar com otimização/MCU mais rápido ou reduzir atrasos de sensor/atuador.  
+3. Jitter alto causa atraso variável → instabilidade/oscilações (ex.: controlo de velocidade com amostragem irregular).  
+4. Acumula backlog ou perde amostras; é problema de throughput que afeta RT; corrigir com processamento mais rápido, redução da taxa ou filtragem/skip.  
+5. Atraso leitura+ação grande gera overshoot (ex.: aquecimento com reação tardia).
+
 # ⭐ 6. Escalonamento
 *(Aula Teórica 5 — slides 8–26; Aula Teórica 6 — slides 2–19)*
 
@@ -816,13 +856,13 @@ O objetivo é garantir que tarefas **completam antes dos deadlines**, respeitand
 - **aᵢ** — instante de chegada (release time).  
 
 ### Utilização
-$
+```math
 U_i = \frac{C_i}{T_i}
-$
+```
 A utilização total do processador é:
-$
+```math
 U = \sum U_i
-$
+```
 
 ### Escalonamento Praticável
 Um escalonamento é **praticável** (feasible schedule) se **todas** as tarefas cumprem **todos os deadlines**, em todas as instâncias.
@@ -888,9 +928,9 @@ Ferramenta visual fundamental para análises em exame.
 
 - Prioridade **dinâmica**: tarefa com deadline mais próximo é executada primeiro.  
 - Com preempção e tarefas independentes:
-$
+```math
 U \le 100\% \quad \Rightarrow \quad \text{escalonável}
-$
+```
 - Potencialmente muitas preempções.  
 - Ideal para sistemas aperiódicos/esporádicos.
 
@@ -900,13 +940,13 @@ $
 - Prioridade **estática**: menor período → maior prioridade.  
 - Decisão baseada apenas nos períodos.  
 - Condição de Liu & Layland:
-$
+```math
 U \le n(2^{1/n}-1)
-$
+```
 Para grandes n:
-$
+```math
 \lim_{n\to\infty} n(2^{1/n}-1) \approx 0.693
-$
+```
 Ou seja, RM garante escalonamento abaixo de **69%** de utilização.
 
 ### Comparação EDF vs RM
@@ -999,5 +1039,13 @@ Dado um sistema aeroportuário que monitoriza velocidade do vento a cada 200 ms:
 
 ---
 
+
+### Gabarito resumido — Escalonamento
+1. SJF: P3 → P4 → P2 → P1 → P5. SRTF: igual (assumindo todas as tarefas disponíveis em t=0).  
+2. \( U \approx 0.897 \le 1 \); ordem EDF por deadline: T3 → T2 → T1.  
+3. \( U = 0.875 \); limite n=3 ≈ 0.779 → não garantido por RM.  
+4. Gantt: P1(0–4) → P2(4–8) → P3(8–12) → P1(12–16) → P3(16–18) → P1(18–20). Tempos de resposta: P2=8, P3=18, P1=20.  
+5. Starvation quando tarefas de maior prioridade dominam; aging aumenta prioridade das tarefas à espera.  
+6. 250 ms > 200 ms → deadline falhado; em Hard RT é inaceitável; garantir via WCET, otimização ou hardware mais rápido.
 
 # ✔ FIM DO GUIA
